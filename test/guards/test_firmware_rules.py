@@ -74,9 +74,10 @@ class Settings(unittest.TestCase):
 
 
 class Tasks(unittest.TestCase):
-    # AI_RULES.md: keypad 8 KB, SSH receive 8 KB, trackball 2 KB, ChatGPT worker 10 KB
+    # AI_RULES.md: keypad 8 KB, SSH receive 8 KB, trackball 2 KB, ChatGPT worker 10 KB,
+    # sign-in page worker 10 KB
     STACKS = {"keypad_task": 8192, "trackball_task": 2048, "ssh_rx": 8192, "chat": "WORKER_STACK",
-              "models": "WORKER_STACK"}
+              "models": "WORKER_STACK", "portal": 10240}
 
     def test_task_stacks_match_budget(self):
         found = {}
@@ -108,6 +109,15 @@ class Bounds(unittest.TestCase):
         self.assertIn(f"networks {networks}", bounds)
         self.assertIn(f"SD keys {keys} / {key_kb} KB", bounds)
         self.assertIn(f"terminal text ~{scrollback // 1024} KB", bounds)
+
+    def test_sign_in_page_bounds(self):
+        header = repo.read("main", "include", "portal.hpp")
+        rules = repo.read("AI_RULES.md").replace("\n", " ")
+        page_kb = int(re.search(r"MAX_PAGE_BYTES = (\d+) \* 1024;", header).group(1))
+        fields = int(re.search(r"MAX_FIELDS = (\d+);", header).group(1))
+        cookies = int(re.search(r"MAX_COOKIES = (\d+);", header).group(1))
+        self.assertIn(f"sign-in pages {page_kb} KB in PSRAM / {fields} fields / {cookies} cookies", rules)
+        self.assertIn("MALLOC_CAP_SPIRAM", SRC["main/portal_client.cpp"])
 
 
 class Logging(unittest.TestCase):
@@ -253,6 +263,81 @@ class Boards(unittest.TestCase):
             for fn in functions:
                 with self.subTest(board=board, function=fn):
                     self.assertRegex(code, rf"board::{fn}\(")
+
+    def test_both_boards_define_every_hint(self):
+        hints = set(re.findall(r"extern const char\* const (HINT_\w+);", repo.read("main", "include", "board.hpp")))
+        self.assertIn("HINT_PICK", hints)
+        for board in ("board_tdeck.cpp", "board_tab5.cpp"):
+            for hint in hints:
+                with self.subTest(board=board, hint=hint):
+                    self.assertRegex(SRC[f"main/{board}"], rf'const char\* const board::{hint} = "')
+
+
+class Ui(unittest.TestCase):
+    """UI model (AI_RULES.md): every menu and prompt is a page; LVGL lives in PSRAM; taps do no work."""
+    MENU_FILES = sorted({os.path.relpath(f, repo.ROOT) for f in glob.glob(os.path.join(repo.MAIN, "*_menu.cpp"))}
+                        | {"main/chat_app.cpp", "main/known_hosts.cpp"})
+
+    def test_no_numbered_text_menus(self):
+        numbered = re.compile(r'append_text\(\s*"(?:\\n)?\s*\d+\)')
+        for name in self.MENU_FILES:
+            with self.subTest(file=name):
+                self.assertNotRegex(SRC[name], numbered, "menus are pages (ui::row), not numbered text")
+
+    def test_every_step_prompt_shows_a_page(self):
+        found = 0
+        for name, code in SRC.items():
+            for m in re.finditer(r"bool SSHTerminal::(\w+_step_prompt)\(\)\s*\{", code):
+                found += 1
+                body = code[m.end():].split("\n}", 1)[0]
+                with self.subTest(file=name, function=m.group(1)):
+                    self.assertIn("show_page(", body, "prompts and menus are drawn as pages")
+        self.assertGreaterEqual(found, 8, "no *_step_prompt() found - update this test")
+
+    def test_lvgl_allocates_in_psram(self):
+        self.assertIn("CONFIG_LV_USE_CUSTOM_MALLOC=y", repo.read("sdkconfig.defaults").splitlines())
+        for config in BOARD_CONFIGS:
+            with self.subTest(sdkconfig=config):
+                self.assertEqual(repo.sdkconfig(config).get("CONFIG_LV_USE_CUSTOM_MALLOC"), "y")
+        mem = repo.strip_comments(repo.read("main", "lv_mem_psram.c"))
+        malloc = mem.split("lv_malloc_core", 1)[1].split("\n}", 1)[0]
+        self.assertTrue("MALLOC_CAP_SPIRAM" in malloc or "PSRAM_CAPS" in malloc)
+        self.assertRegex(mem, r"PSRAM_CAPS\s*=\s*MALLOC_CAP_SPIRAM")
+        self.assertIn('"lv_mem_psram.c"', repo.read("main", "CMakeLists.txt"))
+
+    def test_taps_only_post_an_input_event(self):
+        terminal = SRC["main/ssh_terminal.cpp"]
+        for callback in ("on_tap", "on_back"):
+            with self.subTest(callback=callback):
+                self.assertIn(f"view.{callback} = [", terminal)
+                body = terminal.split(f"view.{callback} = [", 1)[1].split("\n    };", 1)[0]
+                self.assertIn("post_input(board::INPUT_ACTIVATE)", body)
+                for work in ("wizard_handle_input", "page_answer", "connect", "scan", "execute_command",
+                             "handle_key_input", "save"):
+                    self.assertNotIn(work, body, "LVGL callbacks only record the tap; keypad_task does the work")
+        self.assertIn("INPUT_ACTIVATE", SRC["main/deck_base.cpp"])
+
+    def test_page_model_is_host_tested(self):
+        for name in ("main/ui_page.cpp", "main/include/ui_page.hpp"):
+            with self.subTest(file=name):
+                self.assertNotRegex(SRC[name], r'#include\s*[<"](lvgl\.h|esp_|freertos/)',
+                                    "keep the page model free of LVGL / ESP-IDF headers")
+        self.assertIn("${MAIN_DIR}/ui_page.cpp", repo.read("test", "host", "CMakeLists.txt"))
+
+    def test_sources_are_ascii(self):
+        # On-screen text must be ASCII (LV_SYMBOL_* icons are escape sequences); the generated
+        # terminal font is binary data
+        files = (glob.glob(os.path.join(repo.MAIN, "*.cpp")) + glob.glob(os.path.join(repo.MAIN, "*.c"))
+                 + glob.glob(os.path.join(repo.MAIN, "include", "*.h*")))
+        for f in sorted(files):
+            if os.path.basename(f) == "font_term_mono_18.c":
+                continue
+            with open(f, "rb") as fh:
+                data = fh.read()
+            for i, line in enumerate(data.split(b"\n"), 1):
+                if any(b > 0x7F for b in line):
+                    with self.subTest(file=os.path.relpath(f, repo.ROOT), line=i):
+                        self.fail("non-ASCII byte: use plain ASCII or an escape sequence")
 
 
 if __name__ == "__main__":

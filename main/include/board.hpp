@@ -47,13 +47,16 @@ namespace board
     struct Ui {
         const lv_font_t* small;       // Status line, side panel buttons
         const lv_font_t* text;        // Terminal text (its glyph size sets the SSH pty size)
-        const lv_font_t* input;       // Input line, chat bubbles, titles
-        int32_t status_h;             // Status line height
+        const lv_font_t* input;       // Input line, chat bubbles, row details
+        const lv_font_t* title;       // Title bar, page questions
+        const lv_font_t* list;        // Menu rows
+        int32_t status_h;             // Title bar height
         int32_t input_h;              // Input line height
         int32_t panel_w;              // Special-keys side panel
         int32_t button_w;
         int32_t button_h;
-        int32_t gap;                  // Small padding (chat bubbles, panel)
+        int32_t gap;                  // Small padding (chat bubbles, panel, rows)
+        int32_t row_h;                // Menu row height (a comfortable touch target)
     };
     const Ui& ui();
 
@@ -65,6 +68,7 @@ namespace board
     extern const char* const HINT_TALK;     // e.g. "hold the trackball"
     extern const char* const HINT_SCROLL;
     extern const char* const HINT_HISTORY;
+    extern const char* const HINT_PICK;     // How to move through and open menu rows
     extern const char* const HINT_STOP;     // How to press Esc (stops a ChatGPT reply)
     extern const char* const SCREEN_DESC;   // For the ChatGPT system prompt
     extern const char* const HINT_WAKE;     // What wakes the device from sleep

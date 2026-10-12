@@ -32,6 +32,7 @@ const char* const board::NAME = "T-Deck";
 const char* const board::HINT_TALK = "hold the trackball";
 const char* const board::HINT_SCROLL = "Trackball up/down or drag: scroll.";
 const char* const board::HINT_HISTORY = "Left/right: history.";
+const char* const board::HINT_PICK = "Roll to move, press to open";
 const char* const board::HINT_STOP = "Esc (swipe left)";
 const char* const board::SCREEN_DESC = "a tiny handheld with a 320x240 text screen";
 const char* const board::HINT_WAKE = "any key, the trackball or a touch";
@@ -43,9 +44,11 @@ const board::Ui& board::ui()
 {
     static const Ui ui = {
         &lv_font_montserrat_10, &lv_font_montserrat_10, &lv_font_montserrat_12,
-        13, 16,            // Status line, input line
+        &lv_font_montserrat_12, &lv_font_montserrat_12,   // Title bar, menu rows
+        15, 16,            // Title bar, input line (the terminal keeps 19 lines)
         100, 85, 30,       // Side panel and its buttons
         4,
+        24,                // Menu rows: 7 fit between the bars
     };
     return ui;
 }
@@ -82,7 +85,8 @@ void board::init_power()
     gpio_set_direction(BOARD_SPI_MISO, GPIO_MODE_INPUT);
     gpio_set_pull_mode(BOARD_SPI_MISO, GPIO_PULLUP_ONLY);
 
-    // Trackball directions: up/down scroll, left/right command history and menu choices
+    // Trackball directions: up/down scroll (menus: move the highlight), left/right command
+    // history and menu rows
     for (gpio_num_t pin : {BOARD_TBOX_G01, BOARD_TBOX_G02, BOARD_TBOX_G03, BOARD_TBOX_G04}) {
         gpio_reset_pin(pin);
         gpio_set_direction(pin, GPIO_MODE_INPUT);
@@ -176,7 +180,7 @@ uint32_t board::read_key()
 }
 
 // Polls the trackball and queues events; the work happens in keypad_task.
-// Up/down: scroll. Left/right: history / menu choices.
+// Up/down: scroll, or the highlight in a menu. Left/right: history / menu rows.
 // Press: Enter. Hold (> 0.4 s): HOLD_START, then HOLD_END(_LONG) on release.
 static void trackball_task(void *param)
 {

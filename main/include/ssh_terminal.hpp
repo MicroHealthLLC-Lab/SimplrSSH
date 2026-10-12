@@ -19,7 +19,10 @@
 #include "battery_measurement.hpp"
 #include "connection_profiles.hpp"
 #include "openai_client.hpp"
+#include "portal.hpp"
 #include "term_screen.hpp"
+#include "ui_page.hpp"
+#include "ui_view.hpp"
 
 class SSHTerminal
 {
@@ -62,6 +65,8 @@ public:
     void background_tick();
     // Trackball held down (start) / released (long_press: held >= 1 s)
     void on_trackball_hold(bool start, bool long_press);
+    // A page row or the title bar's back arrow was tapped (INPUT_ACTIVATE): answers with it
+    void activate_touched();
     // Shows the home menu (startup, 'menu', 'exit')
     void go_home();
     // Ctrl+Del (Tab5) and the side panel's Menu button: from any screen, ends an SSH session,
@@ -100,7 +105,7 @@ private:
         // Vault (master PIN)
         VaultUnlock, VaultOldPin, VaultNewPin, VaultConfirmPin, VaultConfirmReset,
         // SSH host key trust (known_hosts.cpp)
-        HostTrust, HostConfirmForget,
+        HostTrust, HostList, HostConfirmForget,
         // A key that turned out to need its passphrase, asked on the open connection
         SshKeyPassphrase,
         // Storage / SD card backup (storage_menu.cpp)
@@ -108,7 +113,9 @@ private:
         // Home, security and power menus (home_menu.cpp)
         HomeMenu, SecurityMenu, PowerMenu,
         // ChatGPT (chat_app.cpp)
-        ChatMenu, ChatKeySource, ChatKey, ChatKeyDelete, ChatModelWait, ChatModel, ChatModelOther
+        ChatMenu, ChatKeySource, ChatKey, ChatKeyDelete, ChatModelWait, ChatModel, ChatModelOther,
+        // WiFi sign-in page, captive portal (portal_menu.cpp)
+        PortalWait, PortalPage, PortalField, PortalOption
     };
     enum class WizardAction { None, Connect, Add, Edit, Delete, WifiConnectSaved, WifiForget, SetPin, ChangePin, RemovePin };
     enum class SecretChange { Keep, Set, Clear };
@@ -136,7 +143,6 @@ private:
         WizardStep step = WizardStep::None;
         WizardAction action = WizardAction::None;
         WizardStep menu = WizardStep::None;  // Menu to return to when an action finishes
-        std::vector<std::string> choices;    // Valid answers the trackball can cycle through
         
         ConnectionProfile draft;
         int index = -1;                      // Profile being edited/deleted/connected, -1 = new
@@ -152,18 +158,17 @@ private:
         std::string wifi_ssid;
         bool wifi_open = false;
         bool wifi_hidden = false;
+
+        bool form_return = false;            // A field picked on the Review form: back to it after
     };
 
     lv_obj_t* terminal_screen;
     lv_obj_t* terminal_output;
     lv_obj_t* input_label;
-    lv_obj_t* status_bar;
-    lv_obj_t* byte_counter_label;
     lv_obj_t* side_panel;
     
     std::string current_input;
     size_t cursor_pos;
-    size_t bytes_received;
     std::vector<std::string> command_history;
     int history_index;
     
@@ -232,6 +237,45 @@ private:
     int pty_cols = 80;                 // Terminal size reported to SSH servers
     int pty_rows = 24;
     bool wifi_quiet_connect = false;   // Background reconnect: no progress dots
+
+    // WiFi sign-in page (portal_menu.cpp): only while the user is signing in. The page, what
+    // was typed into it and its cookies live in RAM and are wiped when it ends (wizard_reset).
+    struct PortalJob;
+    portal::Page portal_page;
+    portal::Cookies portal_cookies;
+    int portal_field = -1;                  // Field being filled in or chosen
+    volatile bool portal_busy = false;      // A worker is loading a page
+    volatile uint32_t portal_generation = 0;  // Bumped when the sign-in ends: late pages are dropped
+
+    // Menu and prompt pages (ui_page.hpp, drawn by ui_view.cpp). Every wizard step shows one
+    // with show_page(); picking a row answers with its key, as if typed. Messages printed
+    // since the user's last answer (notice) appear on the next page.
+    enum class ViewMode { Log, Page, Chat, Term };
+    UiView view;
+    ui::Page page;                          // The page of the current wizard step
+    bool page_active = false;
+    int page_selected = -1;                 // Highlighted row
+    uint32_t page_generation = 0;           // Bumped per page: a late tap can't answer the next one
+    ui::Notice notice;
+    std::string touched_key;                // Row tapped (LVGL's task), answered by activate_touched()
+    uint32_t touched_generation = 0;
+    bool touched_back = false;
+    ViewMode view_mode = ViewMode::Log;
+    bool view_dirty = true;                 // sync_view() must re-apply (a new page was built)
+    bool input_in_page = false;             // The input field sits under a page's question
+    bool page_busy = false;                 // A page shown outside any menu step: progress of a
+                                            // blocking step (refresh_display_now()), until it ends
+    bool in_refresh = false;
+    std::string last_title = "SimplrSSH";   // Title for that progress page
+    void show_page(ui::Page new_page);
+    void hide_page();
+    void sync_view();                       // Shows the view for the current state
+    void page_move(int direction);          // Trackball / arrows: move the highlight
+    void page_answer(const std::string& key);
+    void park_input();                      // Input field back on the screen (before a page is freed)
+    void append_log(const char* text);      // To the text log only (SSH output), not the notice
+    std::string input_prefix() const;       // "> " in the console, none on pages and in chat
+    std::string input_placeholder() const;  // Dim hint while nothing is typed
 
     // Full-screen SSH terminal (board::term_screen(), NULL on the T-Deck): shown while SSH is
     // connected; then every key goes to the server (raw_keys())
@@ -319,6 +363,18 @@ private:
     bool wifi_auto_connect(bool quiet);
     bool wifi_step_prompt();
     bool wifi_step_input(const std::string& raw, const std::string& input);
+
+    // WiFi sign-in page, captive portal (portal_menu.cpp)
+    void handle_portal_command(const std::string& command);
+    void portal_load(const portal::Request* request);
+    static void portal_worker(void* param);
+    void portal_done(PortalJob& job);
+    void portal_activate(const portal::Item& item);
+    void portal_send(int form, int submitter);
+    void portal_wipe();
+    bool portal_field_masked() const;
+    bool portal_step_prompt();
+    bool portal_step_input(const std::string& raw, const std::string& input);
     
     // SSH host key verification, trust on first use (known_hosts.cpp)
     enum class HostKeyStatus { Match, Unknown, Mismatch, Error };
@@ -354,6 +410,7 @@ private:
     void handle_chat_command(const std::string& command);
     void open_chat();
     void close_chat();
+    bool chat_has_key() const;
     void chat_clear();
     bool chat_stop();
     void chat_submit(const std::string& text);

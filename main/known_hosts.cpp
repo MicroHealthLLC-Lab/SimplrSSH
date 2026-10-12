@@ -219,18 +219,39 @@ void SSHTerminal::handle_hosts_command(const std::string& command)
 
 bool SSHTerminal::host_step_prompt()
 {
+    ui::Page p;
     switch (wizard.step) {
         case WizardStep::HostTrust:
-            append_text("Trust this server and continue? (y/n) [n]: ");
-            wizard.choices = {"n", "y"};
+            p.title = "New server";
+            p.info = host_port_of(pending_ssh.host, pending_ssh.port) + "\n" + pending_ssh.key_type + " " +
+                     pending_ssh.fingerprint + "\nCheck it on the server: ssh-keygen -lf /etc/ssh/ssh_host_*_key.pub";
+            p.rows = { ui::row("y", "Trust and connect", LV_SYMBOL_OK), ui::row("n", "Don't trust", LV_SYMBOL_CLOSE) };
+            break;
+        case WizardStep::HostList: {
+            std::vector<KnownHost> hosts = load_known_hosts();
+            p.title = "Trusted servers";
+            p.info = hosts.empty() ? "No trusted servers yet. A server's key is saved the first time you trust it."
+                                   : "Pick a server to forget its key.";
+            for (size_t i = 0; i < hosts.size(); i++) {
+                p.rows.push_back(ui::row(std::to_string(i + 1), hosts[i].host_port, LV_SYMBOL_DRIVE,
+                                         hosts[i].key_type + " " + hosts[i].fingerprint));
+            }
+            p.rows.push_back(ui::back_row());
+            show_page(p);
             return true;
+        }
         case WizardStep::HostConfirmForget:
-            append_text(("Forget the saved key for " + forget_host + "? (y/n) [n]: ").c_str());
-            wizard.choices = {"n", "y"};
-            return true;
+            p.title = "Trusted servers";
+            p.info = "Forget the saved key for " + forget_host + "?\nIt is shown again on the next connect.";
+            p.rows = { ui::row("y", "Forget it", LV_SYMBOL_TRASH), ui::row("n", "Keep it", LV_SYMBOL_CLOSE) };
+            p.rows[0].tone = ui::Tone::Danger;
+            break;
         default:
             return false;
     }
+    p.selected = 1;   // "n"
+    show_page(p);
+    return true;
 }
 
 bool SSHTerminal::host_step_input(const std::string& raw_input, const std::string& input)
@@ -258,10 +279,26 @@ bool SSHTerminal::host_step_input(const std::string& raw_input, const std::strin
             }
             return true;
 
+        case WizardStep::HostList: {
+            std::vector<KnownHost> hosts = load_known_hosts();
+            int n = std::all_of(input.begin(), input.end(), ::isdigit) && !input.empty() ? std::atoi(input.c_str()) : -1;
+            if (input == "0") {
+                wizard_reset();
+                wizard.menu = WizardStep::SecurityMenu;
+                wizard_goto(WizardStep::SecurityMenu);
+            } else if (n >= 1 && n <= (int)hosts.size()) {
+                forget_host = hosts[n - 1].host_port;
+                wizard_goto(WizardStep::HostConfirmForget);
+            } else {
+                append_text("Invalid choice.\n");
+                wizard_prompt();
+            }
+            return true;
+        }
+
         case WizardStep::HostConfirmForget: {
             std::string host_port = forget_host;
             forget_host.clear();
-            wizard_reset();
             if (yes) {
                 nvs_handle_t handle;
                 if (settings_nvs::open(NVS_NAMESPACE, NVS_READWRITE, &handle) == ESP_OK) {
@@ -273,6 +310,7 @@ bool SSHTerminal::host_step_input(const std::string& raw_input, const std::strin
             } else {
                 append_text("Kept.\n");
             }
+            wizard_done();   // The list it was picked from, or home
             return true;
         }
 

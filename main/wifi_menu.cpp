@@ -1,6 +1,6 @@
 /*
  * WiFi Menu
- * Menu-driven WiFi setup: scan for networks, pick one from a numbered list,
+ * Menu-driven WiFi setup: scan for networks, pick one from the list,
  * type the password (masked), and optionally save it (encrypted) so the device
  * auto-connects at boot to the strongest saved network in range.
  */
@@ -49,12 +49,10 @@ static int find_ssid(const std::vector<SavedNetwork>& networks, const std::strin
     return -1;
 }
 
-static const char* signal_bars(int rssi)
+// An SSID as the screen shows it: it comes from the air (any bytes), so printable ASCII only
+static std::string shown(const std::string& ssid)
 {
-    if (rssi >= -55) return "####";
-    if (rssi >= -67) return "###";
-    if (rssi >= -75) return "##";
-    return "#";
+    return portal::printable(ssid, 32);
 }
 
 void SSHTerminal::handle_wifi_command(const std::string& command)
@@ -100,8 +98,10 @@ void SSHTerminal::handle_wifi_command(const std::string& command)
         }
     } else if (sub == "off") {
         disconnect_wifi();
+    } else if (sub == "portal" || sub == "signin") {
+        handle_portal_command("portal");
     } else {
-        append_text("Usage: wifi [scan|saved|list|forget|off]\n");
+        append_text("Usage: wifi [scan|saved|list|forget|portal|off]\n");
         append_text("  'wifi' alone opens the menu\n");
     }
 }
@@ -115,7 +115,7 @@ void SSHTerminal::list_saved_networks()
     append_text("Saved networks:\n");
     for (size_t i = 0; i < saved_networks.size(); i++) {
         const SavedNetwork& n = saved_networks[i];
-        std::string line = " " + std::to_string(i + 1) + ") " + n.ssid +
+        std::string line = " " + std::to_string(i + 1) + ") " + shown(n.ssid) +
                            (n.secret_saved ? "  (password saved)" : "  (no password saved)");
         if (wifi_connected && n.ssid == wifi_ssid) {
             line += " - connected";
@@ -199,16 +199,20 @@ void SSHTerminal::wifi_choose_network(const std::string& ssid, bool open)
 void SSHTerminal::wifi_connect_with(const std::string& password, bool from_vault)
 {
     const std::string ssid = wizard.wifi_ssid;
-    append_text(("Connecting to " + ssid + "...\n").c_str());
+    append_text(("Connecting to " + shown(ssid) + "...\n").c_str());
     refresh_display_now();
 
     if (init_wifi(ssid.c_str(), password.c_str()) != ESP_OK) {
-        append_text(("Could not connect to " + ssid + ".\n").c_str());
+        append_text(("Could not connect to " + shown(ssid) + ".\n").c_str());
         wizard_goto(WizardStep::WifiPassword);
         return;
     }
 
-    append_text(("Connected to " + ssid + ".\n").c_str());
+    append_text(("Connected to " + shown(ssid) + ".\n").c_str());
+    if (wizard.wifi_open) {
+        append_text("Open network: if it has a sign-in page (cafe, hotel), choose 'Sign in' in\n"
+                    "the WiFi menu or type 'portal'.\n");
+    }
     // Every network that connects is saved (already saved with this password: nothing to do)
     if (!(from_vault && find_ssid(saved_networks, ssid) >= 0)) {
         wifi_remember_network(ssid, password, wizard.wifi_hidden);
@@ -245,10 +249,10 @@ void SSHTerminal::wifi_remember_network(const std::string& ssid, const std::stri
     if (network_store::save(saved_networks) != ESP_OK) {
         append_text("ERROR: Could not save the network to the device's storage.\n");
     } else if (!password_saved) {
-        append_text(("Saved " + ssid + ". Its password wasn't saved because your PIN hasn't\n"
+        append_text(("Saved " + shown(ssid) + ". Its password wasn't saved because your PIN hasn't\n"
                      "been entered ('vault unlock'), so it will be asked next time.\n").c_str());
     } else {
-        append_text(("Saved " + ssid + " on this device - it will reconnect automatically.\n").c_str());
+        append_text(("Saved " + shown(ssid) + " on this device - it will reconnect automatically.\n").c_str());
     }
 }
 
@@ -311,7 +315,7 @@ bool SSHTerminal::wifi_auto_connect(bool quiet)
                 continue;
             }
             if (!quiet) {
-                append_text(("Connecting to " + c.ssid + "...\n").c_str());
+                append_text(("Connecting to " + shown(c.ssid) + "...\n").c_str());
                 refresh_display_now();
             }
             wifi_quiet_connect = quiet;
@@ -319,7 +323,7 @@ bool SSHTerminal::wifi_auto_connect(bool quiet)
             wifi_quiet_connect = false;
             vault::wipe(password);
             if (err == ESP_OK) {
-                append_text(("WiFi connected: " + c.ssid + "\n").c_str());
+                append_text(("WiFi connected: " + shown(c.ssid) + "\n").c_str());
                 return true;
             }
             ESP_LOGW(TAG, "Auto-connect to a saved network failed");
@@ -377,82 +381,94 @@ void SSHTerminal::wifi_maintain()
 
 bool SSHTerminal::wifi_step_prompt()
 {
-    std::string text;
+    ui::Page p;
+    p.title = "WiFi";
 
     switch (wizard.step) {
-        case WizardStep::WifiMenu:
-            append_text("\n== WiFi ==\n");
-            append_text(wifi_connected ? ("Connected: " + wifi_ssid + "\n").c_str() : "Not connected\n");
-            append_text(" 1) Scan and connect\n"
-                        " 2) Connect to saved network\n"
-                        " 3) Forget saved network\n"
-                        " 4) Disconnect\n"
-                        " 0) Back\n");
-            text = "Select [0-4]: ";
-            wizard.choices = {"1", "2", "3", "4", "0"};
+        case WizardStep::WifiMenu: {
+            p.info = wifi_connected ? "Connected to " + shown(wifi_ssid) : "Not connected";
+            p.rows = {
+                ui::row("1", "Scan and connect", LV_SYMBOL_WIFI),
+                ui::row("2", "Connect to saved network", LV_SYMBOL_LIST,
+                        saved_networks.empty() ? "none" : std::to_string(saved_networks.size()), ui::Mark::More),
+                ui::row("3", "Forget saved network", LV_SYMBOL_TRASH),
+                ui::row("4", "Disconnect", LV_SYMBOL_CLOSE, wifi_connected ? "" : "not connected"),
+                ui::row("5", "Sign in (cafe/hotel page)", LV_SYMBOL_RIGHT, "web page", ui::Mark::More),
+                ui::back_row(),
+            };
+            p.rows[2].tone = ui::Tone::Danger;
             break;
+        }
 
         case WizardStep::WifiPickScan: {
             const size_t n = wizard.scan.size();
-            if (n == 0) {
-                append_text("No networks found.\n");
-            } else {
-                append_text("Networks (strongest first):\n");
-            }
+            p.title = "Networks";
+            p.info = n == 0 ? "No networks found." : "Strongest first";
             for (size_t i = 0; i < n; i++) {
                 const WifiScanResult& r = wizard.scan[i];
-                std::string line = " " + std::to_string(i + 1) + ") " + r.ssid + "  " + signal_bars(r.rssi);
-                if (r.open) {
-                    line += " open";
+                bool connected = wifi_connected && r.ssid == wifi_ssid;
+                std::string detail = std::string(ui::signal_words(r.rssi)) + (r.open ? ", open" : ", secured");
+                if (connected) {
+                    detail += ", connected";
+                } else if (find_ssid(saved_networks, r.ssid) >= 0) {
+                    detail += ", saved";
                 }
-                if (find_ssid(saved_networks, r.ssid) >= 0) {
-                    line += " saved";
-                }
-                if (wifi_connected && r.ssid == wifi_ssid) {
-                    line += " - connected";
-                }
-                append_text((line + "\n").c_str());
+                p.rows.push_back(ui::row(std::to_string(i + 1), shown(r.ssid), LV_SYMBOL_WIFI, detail,
+                                         connected ? ui::Mark::Chosen : ui::Mark::None));
             }
-            append_text((" " + std::to_string(n + 1) + ") Hidden network...\n").c_str());
-            append_text((" " + std::to_string(n + 2) + ") Scan again\n").c_str());
-            append_text(" 0) Back\n");
-            text = "Select [1-" + std::to_string(n + 2) + ", 0=back]: ";
-            for (size_t i = 1; i <= n + 2; i++) {
-                wizard.choices.push_back(std::to_string(i));
-            }
-            wizard.choices.push_back("0");
+            p.rows.push_back(ui::row(std::to_string(n + 1), "Hidden network...", LV_SYMBOL_EDIT));
+            p.rows.push_back(ui::row(std::to_string(n + 2), "Scan again", LV_SYMBOL_REFRESH));
+            p.rows.push_back(ui::back_row());
             break;
         }
 
         case WizardStep::WifiHiddenSsid:
-            text = "Network name (SSID, Enter = back): ";
+            p.title = "Hidden network";
+            p.question = "Network name (SSID)";
+            p.hint = "Enter = back";
             break;
 
         case WizardStep::WifiPassword:
-            text = "Password for " + wizard.wifi_ssid +
-                   (wizard.wifi_hidden ? " (Enter = open network): " : " (Enter = back): ");
+            p.question = "Password for " + shown(wizard.wifi_ssid);
+            p.hint = wizard.wifi_hidden ? "Enter = open network" : "Enter = back";
             break;
 
-        case WizardStep::WifiPickSaved:
-            list_saved_networks();
-            text = std::string(wizard.action == WizardAction::WifiForget ? "Network to forget" : "Network to connect") +
-                   " [1-" + std::to_string(saved_networks.size()) + ", 0=back]: ";
-            for (size_t i = 1; i <= saved_networks.size(); i++) {
-                wizard.choices.push_back(std::to_string(i));
+        case WizardStep::WifiPickSaved: {
+            bool forget = wizard.action == WizardAction::WifiForget;
+            p.title = forget ? "Forget" : "Connect to";
+            for (size_t i = 0; i < saved_networks.size(); i++) {
+                const SavedNetwork& net = saved_networks[i];
+                bool connected = wifi_connected && net.ssid == wifi_ssid;
+                std::string detail = net.secret_saved ? "password saved" : "no password";
+                if (connected) {
+                    detail = "connected, " + detail;
+                }
+                p.rows.push_back(ui::row(std::to_string(i + 1), shown(net.ssid),
+                                         forget ? LV_SYMBOL_TRASH : LV_SYMBOL_WIFI, detail));
+                if (forget) {
+                    p.rows.back().tone = ui::Tone::Danger;
+                }
             }
-            wizard.choices.push_back("0");
+            p.rows.push_back(ui::back_row());
             break;
+        }
 
         case WizardStep::WifiConfirmForget:
-            text = "Forget " + wizard.wifi_ssid + " and its saved password? (y/n) [n]: ";
-            wizard.choices = {"n", "y"};
+            p.title = "Forget network";
+            p.info = "Forget " + shown(wizard.wifi_ssid) + " and its saved password?";
+            p.rows = {
+                ui::row("y", "Forget it", LV_SYMBOL_TRASH),
+                ui::row("n", "Keep it", LV_SYMBOL_CLOSE),
+            };
+            p.rows[0].tone = ui::Tone::Danger;
+            p.selected = 1;   // Default: keep
             break;
 
         default:
             return false;
     }
 
-    append_text(text.c_str());
+    show_page(p);
     return true;
 }
 
@@ -473,6 +489,9 @@ bool SSHTerminal::wifi_step_input(const std::string& raw_input, const std::strin
             } else if (input == "4") {
                 disconnect_wifi();
                 wizard_prompt();
+            } else if (input == "5") {
+                handle_portal_command("portal");
+                show_menu_after(WizardStep::WifiMenu);
             } else if (input == "0") {
                 go_home();
             } else {
@@ -558,7 +577,7 @@ bool SSHTerminal::wifi_step_input(const std::string& raw_input, const std::strin
                     saved_networks.erase(saved_networks.begin() + i);
                     network_store::save(saved_networks);
                 }
-                append_text(("Forgot " + wizard.wifi_ssid + ".\n").c_str());
+                append_text(("Forgot " + shown(wizard.wifi_ssid) + ".\n").c_str());
             } else {
                 append_text("Kept.\n");
             }

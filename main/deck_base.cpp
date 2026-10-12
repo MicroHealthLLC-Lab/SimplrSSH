@@ -55,6 +55,7 @@ static void handle_input_event(uint8_t event)
         case board::INPUT_CURSOR_END:    ssh_terminal->move_cursor_end(); break;
         case board::INPUT_DELETE:        ssh_terminal->delete_at_cursor(); break;
         case board::INPUT_GO_HOME:       ssh_terminal->leave_to_home(); break;   // Ctrl+Del (Tab5)
+        case board::INPUT_ACTIVATE:      ssh_terminal->activate_touched(); break;   // A page row was tapped
         default:
             if (event >= board::INPUT_F1 && event <= board::INPUT_F12) {
                 ssh_terminal->function_key(event - board::INPUT_F1);
@@ -217,7 +218,10 @@ static void keypad_task(void *param)
 
         uint8_t event;
         while (xQueueReceive(input_events, &event, 0) == pdTRUE) {
-            if (!bsp_display_lock(0)) {
+            // A tap or the Menu button is a single deliberate press: wait briefly for a redraw
+            // to finish rather than drop it (trackball steps are dropped, more follow)
+            bool deliberate = event == board::INPUT_ACTIVATE || event == board::INPUT_GO_HOME;
+            if (!bsp_display_lock(deliberate ? 200 : 0)) {
                 continue;
             }
             handle_input_event(event);
