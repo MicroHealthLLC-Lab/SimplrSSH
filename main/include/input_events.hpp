@@ -30,6 +30,7 @@ namespace board
         INPUT_F1,             // Function keys F1-F12 (INPUT_F1 + 0..11), full-screen SSH terminal only
         INPUT_F12 = INPUT_F1 + 11,
         INPUT_GO_HOME,        // Leave whatever is running (SSH, ChatGPT, a menu) for the home menu
+        INPUT_ACTIVATE,       // A page row (or the back arrow) was tapped: answer with it
     };
 
     // Keyboard values (board::read_key()): 0 when no key is waiting, a byte (printable ASCII,

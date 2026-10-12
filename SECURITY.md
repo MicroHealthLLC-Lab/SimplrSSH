@@ -170,6 +170,18 @@ Scope): sign-in pages are now an allowed destination, only while the user runs `
 Not handled by design: pages that need JavaScript (common on hotel and chain portals). Use a phone
 hotspot for those. Hardware behaviour has not been confirmed on a T-Deck or Tab5 yet.
 
+### Page UI: title bar, menu pages, chat bubbles (2026-10-11)
+
+| Change | Security review |
+|---|---|
+| Menus and prompts drawn as pages (rows picked by trackball, arrow keys, touch or number); the sign-in page as a form; ChatGPT as message bubbles | No new network use or stored data. Picking a row answers exactly as typing its key did, so the menus' input checks are unchanged. Password prompts stay masked in the page's input field; moving the highlight wipes a half-typed answer (`vault::wipe`) |
+| Touch taps on rows and the title bar's back arrow | LVGL's callback only records the row and posts an input event; scans, connections and saves run in keypad_task as before (CI guard). A tap is dropped if the page changed before it was handled |
+| WiFi network names from a scan are shown in the menus | SSIDs come from the air (any bytes): the WiFi menus show them as printable ASCII, like sign-in pages |
+| LVGL allocates its objects in PSRAM (`main/lv_mem_psram.c`) | Keeps internal RAM for WiFi, TLS and SSH; pages are freed when left |
+| Answers and messages | Menu answers are no longer echoed into the text log; a page's notice shows only messages printed since the last answer (never SSH output), bounded to 1 KB. The back arrow on a prompt wipes a half-typed answer. The side panel's Menu button now posts an event instead of disconnecting SSH inside LVGL's task |
+
+Hardware behaviour has not been confirmed on a T-Deck or Tab5 yet.
+
 ### Known residual risks
 
 - Flash is not encrypted. Non-secret data (profiles, known hosts, command history, SD keys while

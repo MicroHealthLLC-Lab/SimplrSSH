@@ -54,11 +54,8 @@ SSHTerminal::SSHTerminal()
     : terminal_screen(NULL), 
       terminal_output(NULL), 
       input_label(NULL),
-      status_bar(NULL),
-      byte_counter_label(NULL),
       side_panel(NULL),
       cursor_pos(0),
-      bytes_received(0),
       history_index(-1),
       cursor_blink_timer(NULL),
       cursor_visible(true),
@@ -401,9 +398,20 @@ esp_err_t SSHTerminal::scan_wifi(std::vector<WifiScanResult>& results)
 // Callers already hold the display lock.
 void SSHTerminal::refresh_display_now()
 {
-    if (terminal_output) {
-        lv_refr_now(NULL);
+    if (!terminal_output) {
+        return;
     }
+    // A blocking step outside any menu (connecting, going to sleep): its messages on a page,
+    // under the title of the menu it was started from, rather than the console
+    in_refresh = true;
+    if (!page_active && !chat_active && !ssh_connected && !wifi_quiet_connect && !(term && term->is_open())) {
+        ui::Page busy;
+        busy.title = last_title;
+        show_page(busy);
+    }
+    sync_view();
+    lv_refr_now(NULL);
+    in_refresh = false;
 }
 
 lv_obj_t* SSHTerminal::create_terminal_screen()
@@ -413,24 +421,33 @@ lv_obj_t* SSHTerminal::create_terminal_screen()
     lv_obj_set_style_bg_opa(terminal_screen, LV_OPA_COVER, 0);
     lv_obj_clear_flag(terminal_screen, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Full-screen terminal: one thin status line, text area, one input line
+    // Title bar, text area (or a page / the chat), input line
     const board::Ui& ui = board::ui();
     const int32_t status_h = ui.status_h;
     const int32_t input_h = ui.input_h;
     const int32_t screen_w = lv_display_get_horizontal_resolution(NULL);
     const int32_t screen_h = lv_display_get_vertical_resolution(NULL);
 
-    status_bar = lv_label_create(terminal_screen);
-    lv_label_set_text(status_bar, "");
-    lv_obj_set_style_text_color(status_bar, lv_color_hex(0x00FF00), 0);
-    lv_obj_set_style_text_font(status_bar, ui.small, 0);
-    lv_obj_align(status_bar, LV_ALIGN_TOP_LEFT, 2, 1);
-    
-    byte_counter_label = lv_label_create(terminal_screen);
-    lv_label_set_text(byte_counter_label, "");
-    lv_obj_set_style_text_color(byte_counter_label, lv_color_hex(0x00FFFF), 0);
-    lv_obj_set_style_text_font(byte_counter_label, ui.small, 0);
-    lv_obj_align(byte_counter_label, LV_ALIGN_TOP_RIGHT, -2, 1);
+    // Title bar; menu and prompt pages are built over the text area when shown
+    view.create(terminal_screen, status_h);
+    // A tap only records the row and posts an event: keypad_task answers with it
+    // (menus scan, connect and save, which must not run in LVGL's task)
+    view.on_tap = [this](int row) {
+        if (!page_active || row < 0 || row >= (int)page.rows.size()) {
+            return;
+        }
+        page_selected = row;
+        view.select(row);
+        touched_key = page.rows[row].key;
+        touched_generation = page_generation;
+        touched_back = false;
+        board::post_input(board::INPUT_ACTIVATE);
+    };
+    view.on_back = [this]() {
+        touched_back = true;
+        touched_generation = page_generation;
+        board::post_input(board::INPUT_ACTIVATE);
+    };
 
     terminal_output = lv_textarea_create(terminal_screen);
     lv_obj_set_size(terminal_output, screen_w, screen_h - status_h - input_h);
@@ -531,10 +548,22 @@ static bool at_newest(lv_obj_t* view)
     return lv_obj_get_scroll_bottom(view) <= 4;
 }
 
+// Messages: into the text log, and onto the page shown next (or now) as its notice
+void SSHTerminal::append_text(const char* text)
+{
+    append_log(text);
+    if (text && *text) {
+        notice.add(text);
+        if (page_active) {
+            view.set_notice(notice.text());
+        }
+    }
+}
+
 // Scrollback: when full, the oldest lines are dropped (never the new text).
 // Follows the new text only if the newest line was showing; otherwise the
 // lines being read stay where they are.
-void SSHTerminal::append_text(const char* text)
+void SSHTerminal::append_log(const char* text)
 {
     static const size_t SCROLLBACK_MAX = 6144;
     static const size_t SCROLLBACK_KEEP = 4096;
@@ -603,6 +632,10 @@ void SSHTerminal::scroll_screen(int direction)
         }
         return;
     }
+    if (page_active && direction != 0) {
+        page_move(direction);   // Menus: move the highlight (prompts: scroll the page)
+        return;
+    }
     lv_obj_t* view = visible_view();
     if (!view || direction == 0) {
         return;
@@ -636,11 +669,216 @@ void SSHTerminal::scroll_end_cb(lv_event_t* e)
     }
 }
 
+// ---------------------------------------------------------------------------
+// Pages: every menu and prompt (ui_page.hpp, drawn by ui_view.cpp)
+// ---------------------------------------------------------------------------
+
+void SSHTerminal::show_page(ui::Page new_page)
+{
+    page = std::move(new_page);
+    page_active = true;
+    page_busy = !wizard_active();
+    last_title = page.title;
+    page_generation++;
+    page_selected = ui::clamp_selection(page, page.selected);
+    park_input();   // Out of the old page before it is freed
+    view.show_page(page, notice.text(), page_selected, page.question.empty() ? board::ui().input_h : 0);
+    view_dirty = true;
+    update_input_display();   // Places the input field and shows the hint
+}
+
+void SSHTerminal::hide_page()
+{
+    if (!page_active && !view.page_shown()) {
+        return;
+    }
+    page_active = false;
+    page_busy = false;
+    page = ui::Page();
+    page_selected = -1;
+    page_generation++;
+    park_input();
+    view.hide_page();
+    view_dirty = true;
+    sync_view();
+}
+
+void SSHTerminal::park_input()
+{
+    lv_obj_t* input_box = input_label ? lv_obj_get_parent(input_label) : NULL;
+    if (input_box && lv_obj_get_parent(input_box) != terminal_screen) {
+        lv_obj_set_parent(input_box, terminal_screen);
+        input_in_page = false;
+        view_dirty = true;
+    }
+}
+
+// Shows what the current state needs: a page (menus, prompts), the chat, the full-screen SSH
+// terminal or the text log (console, T-Deck SSH), with the input field in place and styled
+void SSHTerminal::sync_view()
+{
+    if (!terminal_screen || !input_label) {
+        return;
+    }
+    if (page_busy && !wizard_active() && !in_refresh) {
+        hide_page();   // The blocking step is over
+        return;
+    }
+    ViewMode mode = page_active && (wizard_active() || page_busy) ? ViewMode::Page
+                  : chat_active ? ViewMode::Chat
+                  : term && term->is_open() ? ViewMode::Term
+                  : ViewMode::Log;
+    bool question = mode == ViewMode::Page && !page.question.empty() && view.field_slot();
+
+    if (mode != view_mode || question != input_in_page || view_dirty) {
+        view_dirty = false;
+        view_mode = mode;
+        const board::Ui& ui = board::ui();
+        const int32_t screen_w = lv_obj_get_width(terminal_screen);
+        lv_obj_t* input_box = lv_obj_get_parent(input_label);
+
+        if (mode != ViewMode::Page && view.page_shown()) {
+            park_input();
+            view.hide_page();
+        }
+        if (mode == ViewMode::Log) {
+            lv_obj_remove_flag(terminal_output, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(terminal_output, LV_OBJ_FLAG_HIDDEN);
+        }
+
+        // Input: under a page's question, or the bar at the bottom (a rounded field on pages
+        // and in the chat, the terminal's plain "> " line in the console)
+        bool app = mode != ViewMode::Log;
+        if (question) {
+            // Room for a line of text inside the 2 px frame, at least the input bar's height
+            int32_t field_h = LV_MAX(ui.input_h, lv_font_get_line_height(ui.input) + 8);
+            lv_obj_set_parent(input_box, view.field_slot());
+            lv_obj_set_size(input_box, lv_pct(100), field_h);
+            lv_obj_set_pos(input_box, 0, 0);
+        } else {
+            lv_obj_set_parent(input_box, terminal_screen);
+            int32_t margin = app ? ui.gap : 2;
+            lv_obj_set_size(input_box, screen_w - 2 * margin, ui.input_h);
+            lv_obj_align(input_box, LV_ALIGN_BOTTOM_LEFT, margin, 0);
+            lv_obj_move_foreground(input_box);
+        }
+        input_in_page = question;
+        lv_obj_set_style_bg_color(input_box, lv_color_hex(question ? theme::BG : theme::SURFACE), 0);
+        lv_obj_set_style_bg_opa(input_box, app ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_radius(input_box, app ? ui.gap * 2 : 0, 0);
+        lv_obj_set_style_border_width(input_box, question ? 2 : 0, 0);
+        lv_obj_set_style_border_color(input_box, lv_color_hex(theme::ACCENT), 0);
+        lv_obj_set_style_pad_hor(input_box, app ? ui.gap * 2 : 0, 0);
+        if (mode == ViewMode::Term) {
+            lv_obj_add_flag(input_box, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_remove_flag(input_box, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (side_panel) {
+            lv_obj_move_foreground(side_panel);
+        }
+    }
+
+    view.set_back((mode == ViewMode::Page && wizard.step != WizardStep::HomeMenu) || mode == ViewMode::Chat ||
+                  (mode == ViewMode::Log && !ssh_connected));
+
+    view.set_title(mode == ViewMode::Page ? page.title
+                 : mode == ViewMode::Chat ? std::string("ChatGPT")
+                 : ssh_connected ? std::string("SSH") : std::string("Console"));
+}
+
+// Trackball up/down, arrow keys: the next or previous row. Up from the first row (and on a
+// prompt) scrolls the page back toward its messages.
+void SSHTerminal::page_move(int direction)
+{
+    last_input_ms = esp_timer_get_time() / 1000;
+    if (page.rows.empty() || (direction > 0 && page_selected <= 0)) {
+        view.scroll(direction);
+        return;
+    }
+    int next = ui::move(page, page_selected, direction);
+    if (next == page_selected) {
+        return;
+    }
+    page_selected = next;
+    view.select(next);
+    if (!current_input.empty()) {
+        vault::wipe(current_input);   // The highlighted row is the answer now
+        cursor_pos = 0;
+        update_input_display();
+    }
+}
+
+// Answers the current page with a row's key, as if it had been typed
+void SSHTerminal::page_answer(const std::string& key)
+{
+    last_input_ms = esp_timer_get_time() / 1000;
+    vault::wipe(current_input);
+    cursor_pos = 0;
+    history_index = -1;
+    wizard_handle_input(key);
+    update_input_display();
+}
+
+void SSHTerminal::activate_touched()
+{
+    std::string key;
+    key.swap(touched_key);
+    bool back = touched_back;
+    touched_back = false;
+    last_input_ms = esp_timer_get_time() / 1000;
+    if (back && view_mode == ViewMode::Chat) {
+        chat_submit("exit");
+    } else if (back && view_mode == ViewMode::Log && !ssh_connected) {
+        go_home();   // The console's back arrow
+        update_input_display();
+    } else if (!page_active || touched_generation != page_generation) {
+        return;   // The page changed before the tap was handled
+    } else if (back) {
+        // One level up: the Back row, the form a field was picked from, or the menu
+        if (ui::find_row(page, "0") >= 0) {
+            page_answer("0");
+        } else if (wizard_holds_connection()) {
+            handle_key_input(27);   // Closes the half-open connection, like Esc
+        } else {
+            vault::wipe(current_input);   // A half-typed answer may be a password
+            cursor_pos = 0;
+            notice.clear();
+            if (wizard.form_return) {
+                wizard_goto(WizardStep::Review);
+            } else {
+                wizard_done();
+            }
+            update_input_display();
+        }
+    } else if (!key.empty()) {
+        page_answer(key);
+    }
+}
+
+std::string SSHTerminal::input_prefix() const
+{
+    return view_mode == ViewMode::Log ? "> " : "";
+}
+
+std::string SSHTerminal::input_placeholder() const
+{
+    if (view_mode == ViewMode::Chat) {
+        return std::string("Message, or ") + board::HINT_TALK + " to talk";
+    }
+    if (view_mode != ViewMode::Page || page.rows.empty()) {
+        return "";
+    }
+    return wizard.step == WizardStep::HomeMenu ? std::string(board::HINT_PICK) + ", or type a command"
+                                               : board::HINT_PICK;
+}
+
 // Runs a command typed on the input line (or at the home menu)
 void SSHTerminal::execute_command(const std::string& cmd)
 {
     // Home menu numbers work any time the menu isn't on screen (and no SSH session is open)
-    if (!ssh_connected && cmd.size() == 1 && cmd[0] >= '1' && cmd[0] <= '6') {
+    if (!ssh_connected && cmd.size() == 1 && cmd[0] >= '1' && cmd[0] <= '7') {
         wizard_reset();
         wizard.menu = WizardStep::HomeMenu;
         wizard.step = WizardStep::HomeMenu;
@@ -904,21 +1142,13 @@ void SSHTerminal::show_term_view(bool show)
     if (!term || (!show && !term->is_open())) {
         return;
     }
-    lv_obj_t* input_container = input_label ? lv_obj_get_parent(input_label) : NULL;
     if (show) {
         term->open();   // Always a blank screen for a new session
-        lv_obj_add_flag(terminal_output, LV_OBJ_FLAG_HIDDEN);
-        if (input_container) {
-            lv_obj_add_flag(input_container, LV_OBJ_FLAG_HIDDEN);
-        }
     } else {
         term->close();
-        lv_obj_clear_flag(terminal_output, LV_OBJ_FLAG_HIDDEN);
-        if (input_container) {
-            lv_obj_clear_flag(input_container, LV_OBJ_FLAG_HIDDEN);
-        }
         scroll_to_newest();
     }
+    sync_view();
 }
 
 void SSHTerminal::handle_key_input(char key)
@@ -933,8 +1163,12 @@ void SSHTerminal::handle_key_input(char key)
     scroll_to_newest();
 
     if (wizard_active() && (key == '\n' || key == '\r')) {
-        // Wizard answers are never added to command history (they may be passwords)
+        // Wizard answers are never added to command history (they may be passwords).
+        // Nothing typed on a menu: the highlighted row answers.
         std::string answer = current_input;
+        if (answer.empty() && page_active && page_selected >= 0) {
+            answer = page.rows[page_selected].key;
+        }
         current_input.clear();
         cursor_pos = 0;
         history_index = -1;
@@ -961,7 +1195,8 @@ void SSHTerminal::handle_key_input(char key)
             append_text("\n> ");
             append_text(shown.c_str());
             append_text("\n");
-            
+            notice.clear();   // What the command prints shows on the next page, not the command
+
             execute_command(current_input);
 
             // Commands carrying a password stay out of history (it is stored in NVS)
@@ -1004,26 +1239,40 @@ void SSHTerminal::update_input_display()
     if (!input_label) {
         return;
     }
-    
+    sync_view();
+
     // Ensure cursor_pos is within bounds
     if (cursor_pos > current_input.length()) {
         cursor_pos = current_input.length();
     }
-    
+
+    uint32_t color = view_mode == ViewMode::Log ? 0xFFFF00 : theme::TEXT;
+    std::string full_text;
     if (!input_banner.empty()) {
-        lv_label_set_text(input_label, input_banner.c_str());
-        return;
+        full_text = input_banner;
+    } else if (current_input.empty() && !input_placeholder().empty()) {
+        full_text = input_placeholder();
+        color = theme::DIM;
+    } else {
+        // Typing a row's key (a menu number) highlights that row
+        if (page_active) {
+            int row = ui::find_row(page, current_input);
+            if (row >= 0 && row != page_selected) {
+                page_selected = row;
+                view.select(row);
+            }
+        }
+        full_text = input_prefix() + input_display_text();
+        if (cursor_visible) {
+            full_text.insert(input_prefix().length() + cursor_pos, "|");
+        }
     }
-    std::string full_text = "> " + input_display_text();
-    
-    // Insert cursor at correct position
-    if (cursor_visible) {
-        size_t display_pos = 2 + cursor_pos; // 2 = length of "> "
-        full_text.insert(display_pos, "|");
+
+    if (!lv_color_eq(lv_obj_get_style_text_color(input_label, LV_PART_MAIN), lv_color_hex(color))) {
+        lv_obj_set_style_text_color(input_label, lv_color_hex(color), 0);
     }
-    
     lv_label_set_text(input_label, full_text.c_str());
-    
+
     lv_obj_t* container = lv_obj_get_parent(input_label);
     if (container) {
         lv_obj_scroll_to_x(container, LV_COORD_MAX, LV_ANIM_OFF);
@@ -1053,8 +1302,9 @@ void SSHTerminal::input_touch_event_cb(lv_event_t* e)
     // Get font and calculate character position
     const lv_font_t* font = lv_obj_get_style_text_font(label, LV_PART_MAIN);
     
-    // Account for "> " prefix (2 characters)
-    const char* prefix = "> ";
+    // Account for the prompt ("> " in the console)
+    std::string prefix_text = terminal->input_prefix();
+    const char* prefix = prefix_text.c_str();
     lv_point_t prefix_size;
     lv_txt_get_size(&prefix_size, prefix, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
     int32_t prefix_width = prefix_size.x;
@@ -1602,10 +1852,7 @@ esp_err_t SSHTerminal::ssh_begin(PendingSsh&& target)
             return ssh_finish();
 
         case HostKeyStatus::Unknown:
-            append_text(("New server " + t.host + ":" + std::to_string(t.port) + "\n  " + t.key_type + " " +
-                         t.fingerprint + "\n").c_str());
-            append_text("Check it on the server: ssh-keygen -lf /etc/ssh/ssh_host_*_key.pub\n");
-            wizard_reset();
+            wizard_reset();   // The trust page shows the host and its key fingerprint
             wizard_goto(WizardStep::HostTrust);
             return ESP_OK;
 
@@ -1815,12 +2062,6 @@ esp_err_t SSHTerminal::disconnect()
 
 void SSHTerminal::send_command(const char* cmd)
 {
-    bytes_received = 0;
-    if (byte_counter_label && bsp_display_lock(0)) {
-        lv_label_set_text(byte_counter_label, "0 B");
-        bsp_display_unlock();
-    }
-
     std::string full_cmd = std::string(cmd) + "\n";
     ssize_t nwritten = 0;
     int waits = 0;
@@ -1934,8 +2175,6 @@ std::string SSHTerminal::strip_ansi_codes(const char* data, size_t len)
 
 void SSHTerminal::process_received_data(const char* data, size_t len)
 {
-    bytes_received += len;
-
     if (term) {
         // Full-screen terminal: LVGL draws from its cells, so they change under the display lock
         std::string reply;
@@ -1966,7 +2205,7 @@ void SSHTerminal::process_received_data(const char* data, size_t len)
 
 void SSHTerminal::flush_display_buffer()
 {
-    if (text_buffer.empty() && bytes_received == 0) {
+    if (text_buffer.empty()) {
         return;
     }
     
@@ -1977,7 +2216,7 @@ void SSHTerminal::flush_display_buffer()
         if (bsp_display_lock(0)) {
             size_t chunk_len = std::min(CHUNK_SIZE, text_buffer.size() - offset);
             std::string chunk = text_buffer.substr(offset, chunk_len);
-            append_text(chunk.c_str());
+            append_log(chunk.c_str());
             bsp_display_unlock();
             offset += chunk_len;
             
@@ -1991,19 +2230,6 @@ void SSHTerminal::flush_display_buffer()
         text_buffer = text_buffer.substr(offset);
     }
     
-    if (bytes_received > 0 && byte_counter_label && bsp_display_lock(0)) {
-        char counter_text[32];
-        if (bytes_received < 1024) {
-            snprintf(counter_text, sizeof(counter_text), "%zu B", bytes_received);
-        } else if (bytes_received < 1024 * 1024) {
-            snprintf(counter_text, sizeof(counter_text), "%.1f KB", bytes_received / 1024.0);
-        } else {
-            snprintf(counter_text, sizeof(counter_text), "%.2f MB", bytes_received / (1024.0 * 1024.0));
-        }
-        lv_label_set_text(byte_counter_label, counter_text);
-        bsp_display_unlock();
-    }
-    
     if (text_buffer.empty()) {
         last_display_update = esp_timer_get_time() / 1000;
     }
@@ -2011,43 +2237,21 @@ void SSHTerminal::flush_display_buffer()
     vTaskDelay(1);
 }
 
+// Title bar icons: SSH session, WiFi, battery
 void SSHTerminal::update_status_bar()
 {
-    if (!status_bar) return;
-    
-    if (!bsp_display_lock(0)) {
+    if (!terminal_screen || !bsp_display_lock(0)) {
         return;
     }
-
-    std::string status;
-    
+    int percent = -1;
     if (battery_initialized) {
         float voltage = battery.readBatteryVoltage();
         if (voltage > 0.1f) {
-            char voltage_text[32];
-            snprintf(voltage_text, sizeof(voltage_text), "%.2fV | ", voltage);
-            status = voltage_text;
-            ESP_LOGD(TAG, "Battery voltage displayed: %.2fV", voltage);
-        } else {
-            ESP_LOGW(TAG, "Battery voltage too low or invalid: %.2fV", voltage);
+            percent = battery.voltageToPercentage(voltage);
         }
-    } else {
-        ESP_LOGD(TAG, "Battery not initialized, skipping voltage display");
     }
-    
-    if (!wifi_connected) {
-        status += LV_SYMBOL_WIFI " OFF";
-        lv_obj_set_style_text_color(status_bar, lv_color_hex(0xFF0000), 0);
-    } else if (!ssh_connected) {
-        status += LV_SYMBOL_WIFI " | " LV_SYMBOL_CLOSE " SSH";
-        lv_obj_set_style_text_color(status_bar, lv_color_hex(0xFFFF00), 0);
-    } else {
-        status += LV_SYMBOL_WIFI " | " LV_SYMBOL_OK " SSH";
-        lv_obj_set_style_text_color(status_bar, lv_color_hex(0x00FF00), 0);
-    }
-    
-    lv_label_set_text(status_bar, status.c_str());
-    
+    view.set_status(wifi_connected, ssh_connected, percent);
+    sync_view();   // The console's title says whether SSH is connected
     bsp_display_unlock();
 }
 
@@ -2056,9 +2260,11 @@ void SSHTerminal::create_side_panel()
     const board::Ui& ui = board::ui();
     side_panel = lv_obj_create(terminal_screen);
     lv_obj_set_size(side_panel, ui.panel_w, lv_pct(100));
-    lv_obj_set_style_bg_color(side_panel, lv_color_hex(0x101010), 0);
-    lv_obj_set_style_bg_opa(side_panel, LV_OPA_80, 0);
-    lv_obj_set_style_border_color(side_panel, lv_color_hex(0x00FF00), 0);
+    lv_obj_set_style_bg_color(side_panel, lv_color_hex(theme::SURFACE), 0);
+    lv_obj_set_style_bg_opa(side_panel, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(side_panel, 0, 0);
+    lv_obj_set_style_border_side(side_panel, LV_BORDER_SIDE_LEFT, 0);
+    lv_obj_set_style_border_color(side_panel, lv_color_hex(theme::ACCENT), 0);
     lv_obj_set_style_border_width(side_panel, 2, 0);
     lv_obj_set_scrollbar_mode(side_panel, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_scroll_dir(side_panel, LV_DIR_VER);
@@ -2067,7 +2273,7 @@ void SSHTerminal::create_side_panel()
     
     lv_obj_t* title = lv_label_create(side_panel);
     lv_label_set_text(title, "Keys");
-    lv_obj_set_style_text_color(title, lv_color_hex(0x00FF00), 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(theme::TEXT), 0);
     lv_obj_set_style_text_font(title, ui.input, 0);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, ui.gap);
     
@@ -2077,12 +2283,13 @@ void SSHTerminal::create_side_panel()
         lv_obj_t* btn = lv_btn_create(side_panel);
         lv_obj_set_size(btn, ui.button_w, ui.button_h);
         lv_obj_align(btn, LV_ALIGN_TOP_MID, 0, (row++ + 1) * (ui.button_h + ui.gap + 1));
-        lv_obj_set_style_bg_color(btn, lv_color_hex(0x1A1A1A), 0);
-        lv_obj_set_style_bg_color(btn, lv_color_hex(0x00CC00), LV_STATE_PRESSED);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(theme::DIVIDER), 0);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(theme::ACCENT), LV_STATE_PRESSED);
+        lv_obj_set_style_shadow_width(btn, 0, 0);
         
         lv_obj_t* btn_label = lv_label_create(btn);
         lv_label_set_text(btn_label, label);
-        lv_obj_set_style_text_color(btn_label, lv_color_hex(0x00FF00), 0);
+        lv_obj_set_style_text_color(btn_label, lv_color_hex(theme::TEXT), 0);
         lv_obj_set_style_text_font(btn_label, ui.small, 0);
         lv_obj_center(btn_label);
         
@@ -2128,7 +2335,7 @@ void SSHTerminal::send_special_key(const char* sequence)
     
     if (strcmp(sequence, "MENU") == 0) {
         toggle_side_panel();
-        leave_to_home();
+        board::post_input(board::INPUT_GO_HOME);   // keypad_task ends SSH or ChatGPT (it may block)
         return;
     }
     

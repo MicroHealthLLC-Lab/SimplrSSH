@@ -16,11 +16,15 @@ This file is the single source of rules for every AI assistant and contributor.
 `CLAUDE.md` is a symbolic link to it (so Claude Code loads it) and `AGENTS.md` points here:
 edit this file only, and never replace the link with a copy (test/guards/test_rules_file.py).
 
-UI model: a home menu (numbered, `menu` anywhere, `exit` back to it; Ctrl+Del on the Tab5 and
-the side panel's Menu button return to it from any screen, ending SSH or ChatGPT), each app a numbered
-menu of short prompts; the screen is edge-to-edge text (no borders or decoration). SSH sessions:
-on the T-Deck, scrolling text and a line sent with Enter; on the Tab5, a full-screen xterm
-(TUI programs) with every key sent to the server. Keep the T-Deck's terminal as it is.
+UI model: a title bar (page title; SSH, WiFi and battery % icons) over one main area. Every
+menu and prompt is a page (`ui::Page`, `show_page()`): menus are rows picked with the
+trackball / arrow keys + Enter, a touch, or by typing the row's number; a prompt's input field
+sits under its question. A home menu (`menu` anywhere, `exit` back to it; Ctrl+Del on the Tab5
+and the side panel's Menu button return to it from any screen, ending SSH or ChatGPT), each app
+a menu of short prompts; ChatGPT as message bubbles; the console (text log) for typed commands.
+Dark theme, symbol-font icons, no images or animations. SSH sessions: on the T-Deck, scrolling
+text and a line sent with Enter; on the Tab5, a full-screen xterm (TUI programs) with every key
+sent to the server. Keep the T-Deck's terminal as it is.
 Local commands that are also shell commands (`sleep`, `shutdown`, `poweroff`, `power`) are taken
 only while no SSH session is open; in a session they go to the server.
 
@@ -65,6 +69,8 @@ only while no SSH session is open; in a session they go to the server.
 - Bound every collection that grows from user or network input (history 100, profiles 20,
   networks 20, SD keys 8 / 48 KB, terminal text ~6 KB, Tab5 SSH scrollback 1000 lines in PSRAM,
   sign-in pages 192 KB in PSRAM / 60 fields / 30 cookies).
+- LVGL objects live in PSRAM (`CONFIG_LV_USE_CUSTOM_MALLOC`, `main/lv_mem_psram.c`); pages are
+  built per step and freed when left. Avoid opacity and transforms (they need layer buffers).
 - Avoid heap churn in hot paths (SSH receive/render loop): reuse buffers, don't build
   temporary strings per byte.
 
@@ -75,6 +81,8 @@ only while no SSH session is open; in a session they go to the server.
 - LVGL calls only while holding `bsp_display_lock()`. Input tasks take it with timeout 0 and
   drop input if the display is busy, so rendering stays smooth.
 - Use `refresh_display_now()` before a blocking step (scan, connect, PBKDF2) so progress shows.
+- LVGL event callbacks (taps) only record the choice and post an input event
+  (`board::INPUT_ACTIVATE`); keypad_task does the work (scans, connects, saves).
 
 ## Security
 
@@ -89,7 +97,8 @@ only while no SSH session is open; in a session they go to the server.
   Don't bypass known-hosts verification. All libssh2 calls on the session/channel after
   connect must hold `ssh_mutex`.
 - **Input from the network or SD card is untrusted**: bound lengths, check sizes, no format
-  strings built from it.
+  strings built from it. Text from the air or a network (SSIDs, sign-in pages) reaches the
+  screen as printable ASCII (`portal::printable()`); on-screen strings in the source are ASCII.
 - Keep the attack surface closed: station-only WiFi, IPv4, no listening sockets. Settings
   live in `sdkconfig.defaults` with a comment explaining each one.
 - CI actions are pinned to commit SHAs and the build image to a digest; keep it that way.
@@ -168,6 +177,8 @@ only while no SSH session is open; in a session they go to the server.
 | `main/board_tdeck.cpp`, `main/board_tab5.cpp` | Board layer (`board.hpp`): power, display, touch, keyboard, UI metrics, hints |
 | `main/tab5_keyboard.cpp`, `main/tab5_keymap.cpp` | Tab5 Keyboard: I2C driver; key map (host-tested) |
 | `main/ssh_terminal.cpp`, `main/command_redact.cpp` | Terminal UI, command parsing, WiFi driver, SSH connection; password redaction |
+| `main/ui_page.cpp`, `main/include/ui_page.hpp` | Page model: rows, selection, notice, status icons (host-tested) |
+| `main/ui_view.cpp`, `main/lv_mem_psram.c` | Title bar, pages and theme (LVGL); LVGL's allocator in PSRAM |
 | `main/vterm.cpp`, `main/term_view.cpp`, `main/font_term_mono_18.c` | Tab5 full-screen SSH terminal (`term_screen.hpp`, `board::term_screen()`; NULL on the T-Deck): xterm emulator (host-tested); LVGL grid view; its monospace font |
 | `main/known_hosts.cpp` | Host key verification (TOFU), `hosts` command |
 | `main/profile_menu.cpp` | Menu/wizard plumbing, SSH profiles |

@@ -24,6 +24,7 @@ const char* const board::NAME = "Tab5";
 const char* const board::HINT_TALK = "hold Ctrl";
 const char* const board::HINT_SCROLL = "Sym+Up/Down or drag: scroll.";
 const char* const board::HINT_HISTORY = "Up/Down: history.";
+const char* const board::HINT_PICK = "Up/Down to move, Enter to open";
 const char* const board::HINT_STOP = "Esc";
 const char* const board::SCREEN_DESC = "a 5-inch tablet with a 1280x720 text screen";
 const char* const board::HINT_WAKE = "any key or a touch";
@@ -47,9 +48,11 @@ const board::Ui& board::ui()
     // the terminal still gets about 115 x 30 characters
     static const Ui ui = {
         &lv_font_montserrat_16, &lv_font_montserrat_18, &lv_font_montserrat_20,
-        24, 30,            // Status line, input line
+        &lv_font_montserrat_24, &lv_font_montserrat_24,   // Title bar, menu rows
+        38, 48,            // Title bar (the SSH terminal keeps 31 rows), input line
         240, 210, 44,      // Side panel and its buttons
         8,
+        68,                // Menu rows: finger-sized, 8 fit between the bars
     };
     return ui;
 }

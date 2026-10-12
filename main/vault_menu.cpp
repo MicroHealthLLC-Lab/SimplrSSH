@@ -111,26 +111,37 @@ void SSHTerminal::handle_vault_command(const std::string& command)
 
 bool SSHTerminal::vault_step_prompt()
 {
+    ui::Page p;
+    p.title = "PIN";
     switch (wizard.step) {
         case WizardStep::VaultUnlock:
-            append_text("PIN to unlock saved passwords (Enter = skip): ");
-            return true;
+            p.title = "Saved passwords";
+            p.question = "PIN to unlock saved passwords";
+            p.hint = "Enter = skip";
+            break;
         case WizardStep::VaultOldPin:
-            append_text("Current PIN: ");
-            return true;
+            p.question = "Current PIN";
+            p.hint = "Enter = cancel";
+            break;
         case WizardStep::VaultNewPin:
-            append_text("New PIN (min 4 chars, Enter = cancel): ");
-            return true;
+            p.question = "New PIN";
+            p.hint = "At least " + std::to_string((int)VAULT_MIN_PIN_LENGTH) + " characters, Enter = cancel";
+            break;
         case WizardStep::VaultConfirmPin:
-            append_text("Confirm PIN: ");
-            return true;
+            p.question = "Confirm the new PIN";
+            break;
         case WizardStep::VaultConfirmReset:
-            append_text("Erase ALL saved passwords? (y/n) [n]: ");
-            wizard.choices = {"n", "y"};
-            return true;
+            p.title = "Saved passwords";
+            p.info = "Erase ALL saved passwords?\nProfiles and networks are kept.";
+            p.rows = { ui::row("y", "Erase them", LV_SYMBOL_TRASH), ui::row("n", "Keep them", LV_SYMBOL_CLOSE) };
+            p.rows[0].tone = ui::Tone::Danger;
+            p.selected = 1;
+            break;
         default:
             return false;
     }
+    show_page(p);
+    return true;
 }
 
 bool SSHTerminal::vault_step_input(const std::string& raw_input, const std::string& input)

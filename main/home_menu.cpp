@@ -1,13 +1,14 @@
 /*
  * Home Menu
  * The start screen, and where 'menu' / 'exit' / every "0) Back" lead. Numbers
- * open an app; anything else typed is run as a command. Also the Security menu and the
- * Power menu (sleep, turn off; carried out by keypad_task, deck_base.cpp).
+ * open an app (7: the console); anything else typed is run as a command. Also the Security
+ * menu and the Power menu (sleep, turn off; carried out by keypad_task, deck_base.cpp).
  */
 
 #include "ssh_terminal.hpp"
 #include "secret_vault.hpp"
 #include "board.hpp"
+#include "portal.hpp"
 #include "esp_timer.h"
 
 void SSHTerminal::go_home()
@@ -59,45 +60,61 @@ void SSHTerminal::background_tick()
         go_home();
     }
     wifi_maintain();
+    sync_view();   // Ends a progress page left by a blocking step
 }
+
 
 bool SSHTerminal::home_step_prompt()
 {
     switch (wizard.step) {
         case WizardStep::HomeMenu: {
-            std::string status = wifi_connected ? "WiFi: " + wifi_ssid : std::string("WiFi: off");
-            status += " | Saved: " + std::to_string(saved_networks.size()) + " WiFi, " +
-                      std::to_string(profiles.size()) + " SSH";
-            append_text(("\n== SimplrSSH ==\n" + status + "\n").c_str());
-            append_text(" 1) WiFi\n"
-                        " 2) SSH servers\n"
-                        " 3) ChatGPT\n"
-                        " 4) Storage (device / SD card)\n"
-                        " 5) Security (PIN, server keys)\n"
-                        " 6) Power (sleep, turn off)\n"
-                        "Select 1-6, or type a command: ");
-            wizard.choices = {"1", "2", "3", "4", "5", "6"};
+            ui::Page p;
+            p.title = "SimplrSSH";
+            p.rows = {
+                ui::row("1", "WiFi", LV_SYMBOL_WIFI, wifi_connected ? portal::printable(wifi_ssid, 32) : std::string("Off"), ui::Mark::More),
+                ui::row("2", "SSH servers", LV_SYMBOL_DRIVE, std::to_string(profiles.size()) + " saved",
+                        ui::Mark::More),
+                ui::row("3", "ChatGPT", LV_SYMBOL_ENVELOPE, chat_has_key() ? chat_model : std::string("No key"),
+                        ui::Mark::More),
+                ui::row("4", "Storage", LV_SYMBOL_SD_CARD, "", ui::Mark::More),
+                ui::row("5", "Security", LV_SYMBOL_EYE_CLOSE, vault::has_pin() ? "PIN" : "No PIN", ui::Mark::More),
+                ui::row("6", "Power", LV_SYMBOL_POWER, "", ui::Mark::More),
+                ui::row("7", "Console", LV_SYMBOL_KEYBOARD, "type commands"),
+            };
+            show_page(p);
             return true;
         }
-        case WizardStep::SecurityMenu:
-            append_text("\n== Security ==\n");
-            append_text(("Saved passwords: " + std::to_string(vault::count()) +
-                         (vault::has_pin() ? " (PIN protected)\n" : " (no PIN)\n")).c_str());
-            append_text(vault::has_pin() ? " 1) Change PIN\n 2) Remove PIN\n" : " 1) Set a PIN\n");
-            append_text(" 3) Trusted servers\n"
-                        " 4) Erase saved passwords\n"
-                        " 0) Back\n"
-                        "Select: ");
-            wizard.choices = {"1", "2", "3", "4", "0"};
+        case WizardStep::SecurityMenu: {
+            ui::Page p;
+            p.title = "Security";
+            p.info = "Saved passwords: " + std::to_string(vault::count()) +
+                     (vault::has_pin() ? " (PIN protected)" : " (no PIN)");
+            if (vault::has_pin()) {
+                p.rows = {
+                    ui::row("1", "Change PIN", LV_SYMBOL_EDIT),
+                    ui::row("2", "Remove PIN", LV_SYMBOL_EYE_OPEN),
+                };
+            } else {
+                p.rows = { ui::row("1", "Set a PIN", LV_SYMBOL_EYE_CLOSE) };
+            }
+            p.rows.push_back(ui::row("3", "Trusted servers", LV_SYMBOL_LIST));
+            p.rows.push_back(ui::row("4", "Erase saved passwords", LV_SYMBOL_TRASH));
+            p.rows.back().tone = ui::Tone::Danger;
+            p.rows.push_back(ui::back_row());
+            show_page(p);
             return true;
-        case WizardStep::PowerMenu:
-            append_text("\n== Power ==\n");
-            append_text((std::string(" 1) Sleep (wake: ") + board::HINT_WAKE + ")\n").c_str());
-            append_text(" 2) Turn off\n"
-                        " 0) Back\n"
-                        "Select: ");
-            wizard.choices = {"1", "2", "0"};
+        }
+        case WizardStep::PowerMenu: {
+            ui::Page p;
+            p.title = "Power";
+            p.rows = {
+                ui::row("1", "Sleep", LV_SYMBOL_PAUSE, std::string("wake: ") + board::HINT_WAKE),
+                ui::row("2", "Turn off", LV_SYMBOL_POWER),
+                ui::back_row(),
+            };
+            show_page(p);
             return true;
+        }
         default:
             return false;
     }
@@ -123,6 +140,9 @@ bool SSHTerminal::home_step_input(const std::string& raw_input, const std::strin
                 wizard_reset();
                 wizard.menu = WizardStep::PowerMenu;
                 wizard_goto(WizardStep::PowerMenu);
+            } else if (input == "7") {
+                wizard_reset();   // No page: the console (log) shows
+                append_text("Console: type a command ('help' lists them); 'menu' returns.\n");
             } else if (input.empty()) {
                 wizard_prompt();
             } else {
@@ -139,9 +159,9 @@ bool SSHTerminal::home_step_input(const std::string& raw_input, const std::strin
                 handle_vault_command("vault nopin");
                 show_menu_after(WizardStep::SecurityMenu);
             } else if (input == "3") {
-                handle_hosts_command("hosts");
-                append_text("  (remove one with: hosts forget <number>)\n");
-                show_menu_after(WizardStep::SecurityMenu);
+                wizard_reset();
+                wizard.menu = WizardStep::HostList;   // Back here after forgetting one
+                wizard_goto(WizardStep::HostList);
             } else if (input == "4") {
                 handle_vault_command("vault reset");
                 show_menu_after(WizardStep::SecurityMenu);

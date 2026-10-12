@@ -1,23 +1,20 @@
 /*
  * Connection Profile Menu
- * Menu-driven, line-based wizard for listing, adding, editing, deleting and
- * connecting with saved SSH profiles. Prompts are printed into the terminal and
- * answered on the normal input line; numbered menus can also be cycled by rolling the
- * trackball left/right (Tab5 keyboard: Up/Down) and confirmed with a trackball press or Enter.
+ * Listing, adding, editing, deleting and connecting with saved SSH profiles. Each step shows
+ * a page (show_page(): a menu of rows, a form, or a question answered on the input line);
+ * rows are picked with the trackball / arrow keys and Enter, by touch, or by typing their
+ * number. Adding walks the fields once; the Review form then changes any one of them.
  *
- * This file also holds the wizard plumbing shared with the WiFi menu
- * (wifi_menu.cpp) and the master PIN prompts (vault_menu.cpp).
+ * This file also holds the wizard plumbing shared by every menu (home, WiFi, sign-in page,
+ * ChatGPT, storage, security).
  */
 
 #include "ssh_terminal.hpp"
 #include "secret_vault.hpp"
-#include "esp_log.h"
 #include <cstring>
 #include <cctype>
 #include <cstdlib>
 #include <algorithm>
-
-static const char *TAG = "PROFILE_MENU";
 
 static const size_t MAX_NAME_LEN = 32;
 static const size_t MAX_FIELD_LEN = 64;
@@ -41,18 +38,6 @@ static std::string to_lower(std::string s)
 static bool is_number(const std::string& s)
 {
     return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
-}
-
-static std::vector<std::string> numbered_choices(int count, bool with_zero)
-{
-    std::vector<std::string> choices;
-    for (int i = 1; i <= count; i++) {
-        choices.push_back(std::to_string(i));
-    }
-    if (with_zero) {
-        choices.push_back("0");
-    }
-    return choices;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,7 +77,6 @@ std::string SSHTerminal::input_display_text() const
 void SSHTerminal::wizard_goto(WizardStep step)
 {
     wizard.step = step;
-    wizard.choices.clear();
     wizard_prompt();
 }
 
@@ -106,10 +90,7 @@ void SSHTerminal::wizard_prompt()
 
 void SSHTerminal::wizard_handle_input(const std::string& raw_input)
 {
-    // Echo the answer on the prompt line
-    append_text(wizard_input_masked() ? std::string(raw_input.length(), '*').c_str() : raw_input.c_str());
-    append_text("\n");
-
+    notice.clear();   // The next page shows what this answer printed
     const std::string input = trim(raw_input);
 
     if (!wizard_input_masked() && to_lower(input) == "cancel") {
@@ -129,26 +110,12 @@ void SSHTerminal::wizard_handle_input(const std::string& raw_input)
     }
 }
 
+// Trackball left/right (Tab5: Up/Down) in a menu: the previous / next row
 void SSHTerminal::wizard_cycle_choice(int direction)
 {
-    if (wizard.choices.empty()) {
-        return;
+    if (page_active) {
+        page_move(direction);
     }
-
-    auto it = std::find(wizard.choices.begin(), wizard.choices.end(), current_input);
-    int count = wizard.choices.size();
-    int pos;
-    if (it == wizard.choices.end()) {
-        pos = direction > 0 ? count - 1 : 0;
-    } else {
-        // Trackball left (direction > 0) moves to the previous choice, right to the next
-        pos = (int)(it - wizard.choices.begin()) + (direction > 0 ? -1 : 1);
-        pos = (pos + count) % count;
-    }
-
-    current_input = wizard.choices[pos];
-    cursor_pos = current_input.length();
-    update_input_display();
 }
 
 // Finish the current action: back to the menu it was started from, or home
@@ -170,6 +137,7 @@ void SSHTerminal::wizard_reset()
     vault::wipe(wizard.pin);
     wizard = ProfileWizard();
     portal_wipe();   // Leaving a sign-in page ends it
+    hide_page();
 }
 
 // ---------------------------------------------------------------------------
@@ -291,7 +259,6 @@ void SSHTerminal::begin_profile_action(WizardAction action, const std::string& r
         }
         wizard.index = -1;
         wizard.editing = false;
-        append_text("-- New profile ('cancel' or Esc to abort) --\n");
         wizard_goto(WizardStep::Name);
         return;
     }
@@ -332,10 +299,7 @@ void SSHTerminal::on_profile_picked(int index)
             wizard.draft = p;
             wizard.editing = true;
             wizard.secret_change = SecretChange::Keep;
-            append_text("-- Editing '");
-            append_text(p.name.c_str());
-            append_text("' (Enter keeps [current]) --\n");
-            wizard_goto(WizardStep::Name);
+            wizard_goto(WizardStep::Review);   // The form: pick the fields to change
             break;
         case WizardAction::Delete:
             wizard_goto(WizardStep::ConfirmDelete);
@@ -346,133 +310,213 @@ void SSHTerminal::on_profile_picked(int index)
     }
 }
 
+// Title of the profile pages: the server being edited, or a new one
+static std::string profile_page_title(const std::vector<ConnectionProfile>& profiles, int index)
+{
+    if (index >= 0 && index < (int)profiles.size()) {
+        return "Edit " + profiles[index].name;
+    }
+    return "New server";
+}
+
+// Adding a server walks the fields once: "Step n of 5" (sign-in is one step, however many
+// questions it takes). Fields changed from the Review form show no step.
+static std::string add_step_info(bool adding, int step)
+{
+    return adding ? "Step " + std::to_string(step) + " of 5" : "";
+}
+
 bool SSHTerminal::profile_step_prompt()
 {
     const ConnectionProfile& d = wizard.draft;
     const bool can_keep_secret = d.secret_saved && wizard.secret_change == SecretChange::Keep;
-    std::string text;
+    const bool adding = wizard.action == WizardAction::Add && !wizard.form_return;
+    const bool is_key = d.auth == ConnectionProfile::Auth::Key;
+    ui::Page pg;
 
     switch (wizard.step) {
         case WizardStep::MainMenu:
-            append_text("\n== Connection Profiles ==\n"
-                        " 1) Connect\n"
-                        " 2) List\n"
-                        " 3) Add\n"
-                        " 4) Edit\n"
-                        " 5) Delete\n"
-                        " 0) Back\n");
-            text = "Select [0-5]: ";
-            wizard.choices = numbered_choices(5, true);
+            pg.title = "SSH servers";
+            pg.info = profiles.empty() ? "No servers yet" : std::to_string(profiles.size()) + " saved";
+            pg.rows = {
+                ui::row("1", "Connect", LV_SYMBOL_PLAY, "", ui::Mark::More),
+                ui::row("2", "List", LV_SYMBOL_LIST, "", ui::Mark::More),
+                ui::row("3", "Add", LV_SYMBOL_PLUS),
+                ui::row("4", "Edit", LV_SYMBOL_EDIT, "", ui::Mark::More),
+                ui::row("5", "Delete", LV_SYMBOL_TRASH, "", ui::Mark::More),
+                ui::back_row(),
+            };
+            pg.rows[4].tone = ui::Tone::Danger;
+            if (profiles.empty()) {
+                pg.selected = 2;   // Add
+            }
             break;
 
-        case WizardStep::PickProfile: {
-            const char* verb = wizard.action == WizardAction::Connect ? "connect to"
-                             : wizard.action == WizardAction::Edit ? "edit" : "delete";
-            list_profiles();
-            text = "Profile to " + std::string(verb) + " [1-" + std::to_string(profiles.size()) +
-                   ", 0=back]: ";
-            wizard.choices = numbered_choices(profiles.size(), true);
+        case WizardStep::PickProfile:
+            // Connect, Edit, Delete; no action: the read-only list (menu 2)
+            pg.title = wizard.action == WizardAction::Connect ? "Connect to"
+                     : wizard.action == WizardAction::Edit ? "Edit server"
+                     : wizard.action == WizardAction::Delete ? "Delete server" : "Saved servers";
+            for (size_t i = 0; i < profiles.size(); i++) {
+                pg.rows.push_back(ui::row(std::to_string(i + 1), profiles[i].name, LV_SYMBOL_DRIVE,
+                                          profile_summary(profiles[i], profiles[i].secret_saved)));
+            }
+            pg.rows.push_back(ui::back_row());
             break;
-        }
 
         case WizardStep::Name:
-            text = wizard.editing ? "Name [" + d.name + "]: " : "Name: ";
+            pg.title = profile_page_title(profiles, wizard.index);
+            pg.info = add_step_info(adding, 1);
+            pg.question = "Name for this server";
+            pg.hint = wizard.editing ? "Enter = keep " + d.name : "Up to 32 characters, not only digits";
             break;
 
         case WizardStep::Host:
-            text = d.host.empty() ? "Host/IP: " : "Host/IP [" + d.host + "]: ";
+            pg.title = profile_page_title(profiles, wizard.index);
+            pg.info = add_step_info(adding, 2);
+            pg.question = "Host name or IP address";
+            pg.hint = d.host.empty() ? "" : "Enter = keep " + d.host;
             break;
 
         case WizardStep::Port:
-            text = "Port [" + std::to_string(d.port) + "]: ";
+            pg.title = profile_page_title(profiles, wizard.index);
+            pg.info = add_step_info(adding, 3);
+            pg.question = "Port";
+            pg.hint = "Enter = keep " + std::to_string(d.port);
             break;
 
         case WizardStep::User:
-            text = d.username.empty() ? "Username: " : "Username [" + d.username + "]: ";
+            pg.title = profile_page_title(profiles, wizard.index);
+            pg.info = add_step_info(adding, 4);
+            pg.question = "Username";
+            pg.hint = d.username.empty() ? "" : "Enter = keep " + d.username;
             break;
 
-        case WizardStep::AuthMethod:
-            append_text("Authentication:\n"
-                        " 1) SSH key from SD card\n"
-                        " 2) Password\n");
-            text = std::string("Select [") + (d.auth == ConnectionProfile::Auth::Key ? "1" : "2") + "]: ";
-            wizard.choices = numbered_choices(2, false);
+        case WizardStep::AuthMethod: {
+            size_t key_count = loaded_keys.size();
+            pg.title = profile_page_title(profiles, wizard.index);
+            pg.info = add_step_info(adding, 5);
+            if (!pg.info.empty()) {
+                pg.info += "\n";
+            }
+            pg.info += "Sign in with";
+            pg.rows = {
+                ui::row("1", "SSH key from SD card", LV_SYMBOL_SD_CARD,
+                        key_count ? std::to_string(key_count) + (key_count == 1 ? " key" : " keys") : "none loaded",
+                        is_key ? ui::Mark::Chosen : ui::Mark::NotChosen),
+                ui::row("2", "Password", LV_SYMBOL_KEYBOARD, "",
+                        is_key ? ui::Mark::NotChosen : ui::Mark::Chosen),
+            };
+            pg.selected = is_key ? 0 : 1;
             break;
+        }
 
         case WizardStep::PickKey: {
             auto keys = get_loaded_key_names();
-            append_text("SSH keys on SD card:\n");
-            int current = 0;
+            pg.title = profile_page_title(profiles, wizard.index);
+            pg.info = add_step_info(adding, 5);
+            if (!pg.info.empty()) {
+                pg.info += "\n";
+            }
+            pg.info += "SSH keys on the SD card";
             for (size_t i = 0; i < keys.size(); i++) {
-                std::string line = " " + std::to_string(i + 1) + ") " + keys[i] +
-                                   (key_is_openssh_format(keys[i]) ? " (OpenSSH format: convert to PEM)"
-                                    : key_is_encrypted(keys[i]) ? " (passphrase)" : "") + "\n";
-                append_text(line.c_str());
-                if (keys[i] == to_lower(d.key_name)) {
-                    current = i + 1;
+                bool current = keys[i] == to_lower(d.key_name);
+                pg.rows.push_back(ui::row(std::to_string(i + 1), keys[i], LV_SYMBOL_FILE,
+                                          key_is_openssh_format(keys[i]) ? "OpenSSH format: convert to PEM"
+                                          : key_is_encrypted(keys[i]) ? "passphrase" : "",
+                                          current ? ui::Mark::Chosen : ui::Mark::NotChosen));
+                if (current) {
+                    pg.selected = i;
                 }
             }
-            text = "Select key [" + (current ? std::to_string(current) : "1-" + std::to_string(keys.size())) +
-                   ", 0=back]: ";
-            wizard.choices = numbered_choices(keys.size(), true);
+            pg.rows.push_back(ui::back_row());
             break;
         }
 
         case WizardStep::Password:
-            text = can_keep_secret ? "Password (Enter = keep saved, - = ask each connect): "
-                                   : "Password (Enter = ask each connect): ";
+            pg.title = profile_page_title(profiles, wizard.index);
+            pg.info = add_step_info(adding, 5);
+            pg.question = "Password for " + d.username + "@" + d.host;
+            pg.hint = can_keep_secret ? "Enter = keep saved, - = ask each connect" : "Enter = ask each connect";
             break;
 
         case WizardStep::KeyPassphrase:
+            pg.title = profile_page_title(profiles, wizard.index);
+            pg.info = add_step_info(adding, 5);
             // Offered for every key: a key that doesn't say it has one may still have one
             if (key_is_encrypted(d.key_name)) {
-                text = can_keep_secret ? "Key passphrase (Enter = keep saved, - = ask each connect): "
-                                       : "Key passphrase (Enter = ask each connect): ";
+                pg.question = "Passphrase for key " + d.key_name;
+                pg.hint = can_keep_secret ? "Enter = keep saved, - = ask each connect" : "Enter = ask each connect";
             } else {
-                text = can_keep_secret ? "Key passphrase (Enter = keep saved, - = none): "
-                                       : "Key passphrase, if it has one (Enter = none): ";
+                pg.question = "Passphrase for key " + d.key_name + ", if it has one";
+                pg.hint = can_keep_secret ? "Enter = keep saved, - = none" : "Enter = none";
             }
             break;
 
         case WizardStep::Review: {
+            // The form: one row per field (pick one to change just that), then the actions
+            wizard.form_return = false;
             bool saved = wizard.secret_change == SecretChange::Set || can_keep_secret;
-            append_text("-- Review --\n");
-            append_text((" Name: " + d.name + "\n").c_str());
-            append_text((" " + profile_summary(d, saved) + "\n").c_str());
+            std::string secret_status = saved ? "saved"
+                                      : (!is_key || key_is_encrypted(d.key_name)) ? "ask each connect" : "none";
+            pg.title = profile_page_title(profiles, wizard.index);
             if (wizard.secret_change == SecretChange::Set) {
-                append_text(" (password will be stored encrypted)\n");
+                pg.info = is_key ? "Passphrase will be stored encrypted" : "Password will be stored encrypted";
             }
-            append_text(" 1) Save\n"
-                        " 2) Save and connect\n"
-                        " 3) Change something\n"
-                        " 0) Discard\n");
-            text = "Select [1]: ";
-            wizard.choices = {"1", "2", "3", "0"};
+            pg.rows = {
+                ui::row("3", "Name", LV_SYMBOL_EDIT, d.name),
+                ui::row("4", "Host", LV_SYMBOL_DRIVE, d.host),
+                ui::row("5", "Port", LV_SYMBOL_SETTINGS, std::to_string(d.port)),
+                ui::row("6", "User", LV_SYMBOL_HOME, d.username),
+                ui::row("7", "Sign-in", LV_SYMBOL_SD_CARD, is_key ? "Key " + d.key_name : "Password"),
+                ui::row("8", is_key ? "Passphrase" : "Password", LV_SYMBOL_EYE_CLOSE, secret_status),
+                ui::row("1", "Save", LV_SYMBOL_SAVE),
+                ui::row("2", "Save and connect", LV_SYMBOL_OK),
+                ui::back_row("Discard"),
+            };
+            if (!is_key) {
+                pg.rows[4].icon = LV_SYMBOL_KEYBOARD;
+            }
+            pg.selected = 6;   // Save
             break;
         }
 
-        case WizardStep::ConfirmDelete:
-            text = "Delete '" + profiles[wizard.index].name + "'? (y/n) [n]: ";
-            wizard.choices = {"n", "y"};
+        case WizardStep::ConfirmDelete: {
+            const ConnectionProfile& p = profiles[wizard.index];
+            pg.title = "Delete server";
+            pg.info = "Delete '" + p.name + "'?\n" + profile_summary(p, p.secret_saved);
+            pg.rows = {
+                ui::row("y", "Delete", LV_SYMBOL_TRASH),
+                ui::row("n", "Keep it", LV_SYMBOL_CLOSE),
+            };
+            pg.rows[0].tone = ui::Tone::Danger;
+            pg.selected = 1;
             break;
+        }
 
         case WizardStep::ConnectSecret: {
             const ConnectionProfile& p = profiles[wizard.index];
-            text = p.auth == ConnectionProfile::Auth::Key
-                 ? "Passphrase for " + p.key_name + ": "
-                 : "Password for " + p.username + "@" + p.host + ": ";
+            pg.title = "Connect";
+            pg.info = p.name;
+            pg.question = p.auth == ConnectionProfile::Auth::Key
+                        ? "Passphrase for key " + p.key_name
+                        : "Password for " + p.username + "@" + p.host;
+            pg.hint = "Enter = cancel";
             break;
         }
 
         case WizardStep::SshKeyPassphrase:
-            text = "Key passphrase (Enter = cancel): ";
+            pg.title = "Connect";
+            pg.info = pending_ssh.username + "@" + pending_ssh.host;
+            pg.question = "Key passphrase";
+            pg.hint = "Enter = cancel";
             break;
 
         default:
             return false;
     }
 
-    append_text(text.c_str());
+    show_page(pg);
     return true;
 }
 
@@ -480,14 +524,21 @@ bool SSHTerminal::profile_step_input(const std::string& raw_input, const std::st
 {
     ConnectionProfile& d = wizard.draft;
     const bool can_keep_secret = d.secret_saved && wizard.secret_change == SecretChange::Keep;
+    // After a field's answer: the next field, or back to the Review form it was picked from
+    auto next_field = [this](WizardStep next) { return wizard.form_return ? WizardStep::Review : next; };
 
     switch (wizard.step) {
         case WizardStep::MainMenu:
             if (input == "1") {
                 begin_profile_action(WizardAction::Connect, "");
             } else if (input == "2") {
-                list_profiles();
-                wizard_prompt();
+                if (profiles.empty()) {
+                    append_text("No saved profiles. Use 'profile add' to create one.\n");
+                    wizard_prompt();
+                } else {
+                    wizard.action = WizardAction::None;   // Read-only list: picking returns here
+                    wizard_goto(WizardStep::PickProfile);
+                }
             } else if (input == "3") {
                 begin_profile_action(WizardAction::Add, "");
             } else if (input == "4") {
@@ -519,7 +570,7 @@ bool SSHTerminal::profile_step_input(const std::string& raw_input, const std::st
 
         case WizardStep::Name: {
             if (input.empty() && wizard.editing) {
-                wizard_goto(WizardStep::Host);
+                wizard_goto(next_field(WizardStep::Host));
                 break;
             }
             const char* error = NULL;
@@ -540,45 +591,45 @@ bool SSHTerminal::profile_step_input(const std::string& raw_input, const std::st
                 wizard_prompt();
             } else {
                 d.name = input;
-                wizard_goto(WizardStep::Host);
+                wizard_goto(next_field(WizardStep::Host));
             }
             break;
         }
 
         case WizardStep::Host:
             if (input.empty() && !d.host.empty()) {
-                wizard_goto(WizardStep::Port);
+                wizard_goto(next_field(WizardStep::Port));
             } else if (input.empty() || input.find(' ') != std::string::npos || input.length() > MAX_FIELD_LEN) {
                 append_text("Enter a host name or IP address.\n");
                 wizard_prompt();
             } else {
                 d.host = input;
-                wizard_goto(WizardStep::Port);
+                wizard_goto(next_field(WizardStep::Port));
             }
             break;
 
         case WizardStep::Port:
             if (input.empty()) {
-                wizard_goto(WizardStep::User);
+                wizard_goto(next_field(WizardStep::User));
             } else if (!is_number(input) || input.length() > 5 ||
                        std::atoi(input.c_str()) < 1 || std::atoi(input.c_str()) > 65535) {
                 append_text("Port must be 1-65535.\n");
                 wizard_prompt();
             } else {
                 d.port = std::atoi(input.c_str());
-                wizard_goto(WizardStep::User);
+                wizard_goto(next_field(WizardStep::User));
             }
             break;
 
         case WizardStep::User:
             if (input.empty() && !d.username.empty()) {
-                wizard_goto(WizardStep::AuthMethod);
+                wizard_goto(next_field(WizardStep::AuthMethod));
             } else if (input.empty() || input.find(' ') != std::string::npos || input.length() > MAX_FIELD_LEN) {
                 append_text("Enter a username.\n");
                 wizard_prompt();
             } else {
                 d.username = input;
-                wizard_goto(WizardStep::AuthMethod);
+                wizard_goto(next_field(WizardStep::AuthMethod));
             }
             break;
 
@@ -668,10 +719,17 @@ bool SSHTerminal::profile_step_input(const std::string& raw_input, const std::st
                 save_profile_draft(false);
             } else if (input == "2") {
                 save_profile_draft(true);
-            } else if (input == "3") {
-                // Walk the steps again with the draft values as defaults
+            } else if (input.length() == 1 && input[0] >= '3' && input[0] <= '8') {
+                // A field row: change just that field (current values as defaults), then back here
+                static const WizardStep fields[] = {WizardStep::Name, WizardStep::Host, WizardStep::Port,
+                                                    WizardStep::User, WizardStep::AuthMethod, WizardStep::Password};
+                WizardStep field = fields[input[0] - '3'];
+                if (field == WizardStep::Password && d.auth == ConnectionProfile::Auth::Key) {
+                    field = WizardStep::KeyPassphrase;
+                }
                 wizard.editing = true;
-                wizard_goto(WizardStep::Name);
+                wizard.form_return = true;
+                wizard_goto(field);
             } else if (input == "0") {
                 append_text("Discarded.\n");
                 wizard_done();
@@ -786,18 +844,18 @@ void SSHTerminal::start_profile_connect(int index)
 
     if (ssh_connected) {
         append_text("Already connected. Type 'exit' to disconnect first.\n");
-        wizard_reset();
+        wizard_done();   // Back to the menu, the message in its notice
         return;
     }
     if (!wifi_connected) {
         append_text("WiFi not connected. Type 'wifi' to pick a network.\n");
-        wizard_reset();
+        wizard_done();   // Back to the menu, the message in its notice
         return;
     }
     if (p.auth == ConnectionProfile::Auth::Key && !get_loaded_key(p.key_name.c_str(), NULL)) {
         append_text(("ERROR: Key '" + p.key_name + "' is not on the SD card.\n").c_str());
         append_text("Use 'profile edit' to pick another key.\n");
-        wizard_reset();
+        wizard_done();   // Back to the menu, the message in its notice
         return;
     }
 
@@ -833,7 +891,6 @@ void SSHTerminal::start_profile_connect(int index)
 
 void SSHTerminal::connect_profile(const ConnectionProfile& profile, const std::string& secret)
 {
-    ESP_LOGI(TAG, "Connecting with profile '%s'", profile.name.c_str());
     append_text(("Profile '" + profile.name + "'\n").c_str());
     refresh_display_now();
 

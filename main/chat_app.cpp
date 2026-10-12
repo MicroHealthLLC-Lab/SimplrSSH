@@ -24,7 +24,7 @@
 #include <cstdio>
 
 static const char *TAG = "CHAT";
-static const char *KEY_ID = "chat:openai";
+static const char *KEY_ID = "chat:openai";   // Vault id of the OpenAI API key
 static const size_t MODELS_SHOWN = 20;        // Models listed in the Model menu
 static const size_t MAX_KEY_LEN = 256;         // Vault limit
 static const size_t MAX_HISTORY = 12;          // Messages kept for context
@@ -286,18 +286,90 @@ void SSHTerminal::chat_models_done(bool ok, const openai::Models& models, const 
 // Chat view
 // ---------------------------------------------------------------------------
 
-// Follows new text only while the newest line shows (see append_text)
+// Message bubbles: a full-width transparent row per message (bubble right for the user, left
+// for ChatGPT, notes centred), holding one label styled as the bubble. Shared styles, set up
+// once, instead of per-object local styles. No opacity or transforms: they need layer buffers.
+static lv_style_t s_row, s_row_user, s_row_ai, s_row_info;
+static lv_style_t s_bubble, s_user, s_ai, s_info;
+static bool s_styles_ready = false;
+
+static void init_chat_styles()
+{
+    if (s_styles_ready) {
+        return;
+    }
+    s_styles_ready = true;
+    const int32_t gap = board::ui().gap;
+
+    lv_style_init(&s_row);
+    lv_style_set_width(&s_row, lv_pct(100));
+    lv_style_set_height(&s_row, LV_SIZE_CONTENT);
+    lv_style_set_layout(&s_row, LV_LAYOUT_FLEX);
+    lv_style_set_flex_flow(&s_row, LV_FLEX_FLOW_ROW);
+    lv_style_init(&s_row_user);
+    lv_style_set_flex_main_place(&s_row_user, LV_FLEX_ALIGN_END);
+    lv_style_init(&s_row_ai);
+    lv_style_set_flex_main_place(&s_row_ai, LV_FLEX_ALIGN_START);
+    lv_style_init(&s_row_info);
+    lv_style_set_flex_main_place(&s_row_info, LV_FLEX_ALIGN_CENTER);
+
+    lv_style_init(&s_bubble);
+    lv_style_set_radius(&s_bubble, gap * 3);
+    lv_style_set_pad_hor(&s_bubble, gap * 2);
+    lv_style_set_pad_ver(&s_bubble, gap);
+    lv_style_set_bg_opa(&s_bubble, LV_OPA_COVER);
+    lv_style_set_text_font(&s_bubble, board::ui().input);
+    lv_style_init(&s_user);
+    lv_style_set_bg_color(&s_user, lv_color_hex(theme::ACCENT));
+    lv_style_set_text_color(&s_user, lv_color_white());
+    lv_style_init(&s_ai);
+    lv_style_set_bg_color(&s_ai, lv_color_hex(theme::DIVIDER));
+    lv_style_set_text_color(&s_ai, lv_color_hex(theme::TEXT));
+    lv_style_init(&s_info);
+    lv_style_set_width(&s_info, lv_pct(100));
+    lv_style_set_bg_opa(&s_info, LV_OPA_TRANSP);
+    lv_style_set_text_color(&s_info, lv_color_hex(theme::DIM));
+    lv_style_set_text_font(&s_info, board::ui().small);
+    lv_style_set_text_align(&s_info, LV_TEXT_ALIGN_CENTER);
+}
+
+// Fits a bubble to its text, up to 80% of the view's width. Measured here because LVGL wraps a
+// content-sized label at its max width before taking off the padding, which would cut a line.
+static void fit_bubble(lv_obj_t* view, lv_obj_t* label)
+{
+    int32_t pad = lv_obj_get_style_pad_left(label, LV_PART_MAIN) + lv_obj_get_style_pad_right(label, LV_PART_MAIN);
+    int32_t view_w = lv_obj_get_style_width(view, LV_PART_MAIN) - 2 * board::ui().gap;
+    int32_t max_text = LV_MAX(view_w * 4 / 5 - pad, 1);
+    lv_point_t size;
+    lv_text_get_size(&size, lv_label_get_text(label), lv_obj_get_style_text_font(label, LV_PART_MAIN),
+                     0, 0, max_text, LV_TEXT_FLAG_NONE);
+    lv_obj_set_width(label, LV_MIN(size.x, max_text) + pad);
+}
+
+// Returns the message's label (chat_ui_update() changes its text). Follows new text only while
+// the newest line shows (see append_text).
 lv_obj_t* SSHTerminal::chat_add_bubble(int kind, const std::string& text)
 {
+    init_chat_styles();
     bool follow = chat_follow && !touch_scrolling(chat_view);
     int32_t view_y = lv_obj_get_scroll_y(chat_view);
-    lv_obj_t* label = lv_label_create(chat_view);
+
+    lv_obj_t* row = lv_obj_create(chat_view);
+    lv_obj_remove_style_all(row);
+    lv_obj_remove_flag(row, (lv_obj_flag_t)(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));  // Drags scroll the view
+    lv_obj_add_style(row, &s_row, 0);
+    lv_obj_add_style(row, kind == BUBBLE_USER ? &s_row_user : kind == BUBBLE_AI ? &s_row_ai : &s_row_info, 0);
+
+    lv_obj_t* label = lv_label_create(row);
+    lv_obj_remove_style_all(label);
     lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(label, lv_pct(100));
-    lv_obj_set_style_text_font(label, board::ui().input, 0);
-    lv_obj_set_style_text_align(label, kind == BUBBLE_USER ? LV_TEXT_ALIGN_RIGHT : LV_TEXT_ALIGN_LEFT, 0);
-    lv_obj_set_style_text_color(label, lv_color_hex(kind == BUBBLE_USER ? 0xFFFF00 : kind == BUBBLE_AI ? 0x00FF00 : 0x8080A0), 0);
+    lv_obj_add_style(label, &s_bubble, 0);
+    lv_obj_add_style(label, kind == BUBBLE_USER ? &s_user : kind == BUBBLE_AI ? &s_ai : &s_info, 0);
     lv_label_set_text(label, text.c_str());
+    if (kind != BUBBLE_INFO) {
+        fit_bubble(chat_view, label);
+    }
+
     while (lv_obj_get_child_count(chat_view) > MAX_BUBBLES) {
         lv_obj_t* oldest = lv_obj_get_child(chat_view, 0);
         view_y -= lv_obj_get_height(oldest) + lv_obj_get_style_pad_row(chat_view, LV_PART_MAIN);
@@ -326,6 +398,7 @@ void SSHTerminal::chat_ui_update(uint32_t generation, lv_obj_t* label, const std
     if (label && bsp_display_lock(200)) {
         if (chat_view && generation == chat_generation) {
             lv_label_set_text(label, text.c_str());
+            fit_bubble(chat_view, label);
             if (chat_follow && !touch_scrolling(chat_view)) {
                 lv_obj_update_layout(chat_view);
                 lv_obj_scroll_to_y(chat_view, LV_COORD_MAX, LV_ANIM_OFF);
@@ -370,12 +443,11 @@ void SSHTerminal::open_chat()
         chat_view = lv_obj_create(terminal_screen);
         lv_obj_set_size(chat_view, lv_obj_get_width(terminal_output), lv_obj_get_height(terminal_output));
         lv_obj_align_to(chat_view, terminal_output, LV_ALIGN_TOP_LEFT, 0, 0);
-        lv_obj_set_style_bg_color(chat_view, lv_color_black(), 0);
-        lv_obj_set_style_border_color(chat_view, lv_color_hex(0x00FF00), 0);
-        lv_obj_set_style_border_width(chat_view, 2, 0);
+        lv_obj_set_style_bg_color(chat_view, lv_color_hex(theme::BG), 0);
+        lv_obj_set_style_border_width(chat_view, 0, 0);
         lv_obj_set_style_radius(chat_view, 0, 0);
         lv_obj_set_style_pad_all(chat_view, board::ui().gap, 0);
-        lv_obj_set_style_pad_row(chat_view, board::ui().gap * 3 / 2, 0);
+        lv_obj_set_style_pad_row(chat_view, board::ui().gap, 0);
         lv_obj_set_flex_flow(chat_view, LV_FLEX_FLOW_COLUMN);
         // Drag or roll the trackball to scroll back; a thin bar shows only while scrolling
         lv_obj_set_scroll_dir(chat_view, LV_DIR_VER);
@@ -383,16 +455,19 @@ void SSHTerminal::open_chat()
         lv_obj_set_style_width(chat_view, 2, LV_PART_SCROLLBAR);
         lv_obj_add_event_cb(chat_view, scroll_end_cb, LV_EVENT_SCROLL_END, this);
         chat_follow = true;
-        lv_obj_add_flag(terminal_output, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(side_panel);
 
-        chat_add_bubble(BUBBLE_INFO, "ChatGPT (" + chat_model + ") - type, or " + board::HINT_TALK + " to talk. " +
-                                     board::HINT_STOP + " stops a reply.\n"
-                                     "'clear' new chat | 'settings' | 'exit' menu");
+        chat_add_bubble(BUBBLE_INFO, chat_model + "\n'clear' new chat, 'settings', 'exit'. " +
+                                     board::HINT_STOP + " stops a reply.");
         for (const auto& m : chat_history) {
             chat_add_bubble(m.from_user ? BUBBLE_USER : BUBBLE_AI, m.text);
         }
     });
+}
+
+// An OpenAI API key is saved (the home menu shows "No key" otherwise)
+bool SSHTerminal::chat_has_key() const
+{
+    return vault::has(KEY_ID);
 }
 
 void SSHTerminal::close_chat()
@@ -406,7 +481,6 @@ void SSHTerminal::close_chat()
         lv_obj_delete(chat_view);
         chat_view = NULL;
     }
-    lv_obj_clear_flag(terminal_output, LV_OBJ_FLAG_HIDDEN);
     update_input_display();
 }
 
@@ -723,58 +797,86 @@ void SSHTerminal::on_trackball_hold(bool start, bool long_press)
 bool SSHTerminal::chat_step_prompt()
 {
     switch (wizard.step) {
-        case WizardStep::ChatMenu:
-            append_text("\n== ChatGPT ==\n");
-            append_text(("Model: " + chat_model + " | Key: " + (vault::has(KEY_ID) ? "saved" : "not set") +
-                         " | Spoken replies: " + (chat_speak ? "on" : "off") + "\n").c_str());
-            append_text(" 1) Chat\n"
-                        " 2) API key\n"
-                        " 3) Model\n");
-            append_text(chat_speak ? " 4) Spoken replies: turn off\n" : " 4) Spoken replies: turn on\n");
-            append_text(" 5) New chat (clear)\n"
-                        " 0) Back\n"
-                        "Select [1]: ");
-            wizard.choices = {"1", "2", "3", "4", "5", "0"};
-            return true;
-        case WizardStep::ChatKeySource:
-            append_text("OpenAI API key (platform.openai.com > API keys):\n"
-                        " 1) Type it\n"
-                        " 2) Load from SD card file openai.key\n"
-                        " 0) Back\n"
-                        "Select [1]: ");
-            wizard.choices = {"1", "2", "0"};
-            return true;
-        case WizardStep::ChatKey:
-            append_text("API key (sk-...): ");
-            return true;
-        case WizardStep::ChatKeyDelete:
-            append_text(("Delete " + s_key_file + " from the SD card now? (y/n) [y]: ").c_str());
-            wizard.choices = {"y", "n"};
-            return true;
-        case WizardStep::ChatModelWait:
-            append_text("Asking OpenAI which models your key can use...\n");
-            return true;
-        case WizardStep::ChatModel: {
-            size_t shown = std::min(chat_models.size(), MODELS_SHOWN);
-            wizard.choices.clear();
-            if (shown == 0) {
-                append_text(("Model: " + chat_model + "\n").c_str());
-            } else {
-                append_text("Models for your key (newest first):\n");
-            }
-            for (size_t i = 0; i < shown; i++) {
-                append_text((" " + std::to_string(i + 1) + ") " + chat_models[i] +
-                             (chat_models[i] == chat_model ? " *" : "") + "\n").c_str());
-                wizard.choices.push_back(std::to_string(i + 1));
-            }
-            append_text(" t) Type a model name\n 0) Back\nSelect: ");
-            wizard.choices.push_back("t");
-            wizard.choices.push_back("0");
+        case WizardStep::ChatMenu: {
+            ui::Page p;
+            p.title = "ChatGPT";
+            p.rows = {
+                ui::row("1", "Chat", LV_SYMBOL_ENVELOPE),
+                ui::row("2", "API key", LV_SYMBOL_EYE_CLOSE, vault::has(KEY_ID) ? "saved" : "not set", ui::Mark::More),
+                ui::row("3", "Model", LV_SYMBOL_SETTINGS, chat_model, ui::Mark::More),
+                ui::row("4", "Spoken replies", LV_SYMBOL_VOLUME_MAX, "", chat_speak ? ui::Mark::On : ui::Mark::Off),
+                ui::row("5", "New chat (clear)", LV_SYMBOL_REFRESH),
+                ui::back_row(),
+            };
+            show_page(p);
             return true;
         }
-        case WizardStep::ChatModelOther:
-            append_text("Model name (e.g. gpt-4o): ");
+        case WizardStep::ChatKeySource: {
+            ui::Page p;
+            p.title = "API key";
+            p.info = "Get one at platform.openai.com > API keys";
+            p.rows = {
+                ui::row("1", "Type it", LV_SYMBOL_KEYBOARD),
+                ui::row("2", "Load from SD card", LV_SYMBOL_SD_CARD, "openai.key"),
+                ui::back_row(),
+            };
+            show_page(p);
             return true;
+        }
+        case WizardStep::ChatKey: {
+            ui::Page p;
+            p.title = "API key";
+            p.question = "API key (sk-...)";
+            p.hint = "Enter = back";
+            show_page(p);
+            return true;
+        }
+        case WizardStep::ChatKeyDelete: {
+            ui::Page p;
+            p.title = "API key";
+            p.info = "Delete " + s_key_file + " from the SD card now?";
+            p.rows = {
+                ui::row("y", "Delete it", LV_SYMBOL_TRASH),
+                ui::row("n", "Keep it", LV_SYMBOL_CLOSE),
+            };
+            p.rows[0].tone = ui::Tone::Danger;
+            show_page(p);
+            return true;
+        }
+        case WizardStep::ChatModelWait: {
+            ui::Page p;
+            p.title = "Model";
+            p.info = "Asking OpenAI which models your key can use...";
+            show_page(p);
+            return true;
+        }
+        case WizardStep::ChatModel: {
+            ui::Page p;
+            p.title = "Model";
+            size_t shown = std::min(chat_models.size(), MODELS_SHOWN);
+            p.selected = (int)shown + 1;   // Back, unless the current model is listed
+            p.info = shown == 0 ? "Model: " + chat_model : "Models for your key (newest first)";
+            for (size_t i = 0; i < shown; i++) {
+                bool chosen = chat_models[i] == chat_model;
+                if (chosen) {
+                    p.selected = (int)i;
+                }
+                p.rows.push_back(ui::row(std::to_string(i + 1), chat_models[i], nullptr, "",
+                                         chosen ? ui::Mark::Chosen : ui::Mark::NotChosen));
+            }
+            p.rows.push_back(ui::row("t", "Type a model name", LV_SYMBOL_EDIT));
+            p.rows.push_back(ui::back_row());
+            show_page(p);
+            return true;
+        }
+        case WizardStep::ChatModelOther: {
+            ui::Page p;
+            p.title = "Model";
+            p.question = "Model name (e.g. gpt-4o)";
+            p.hint = "Enter = back";
+            show_page(p);
+            return true;
+        }
         default:
             return false;
     }

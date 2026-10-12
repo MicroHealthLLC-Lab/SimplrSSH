@@ -156,51 +156,56 @@ void SSHTerminal::reload_saved_settings()
 
 bool SSHTerminal::storage_step_prompt()
 {
+    ui::Page p;
+    p.title = "Storage";
     switch (wizard.step) {
         case WizardStep::StorageMenu: {
             settings_backup::Counts device = settings_backup::count_device();
-            append_text("\n== Storage ==\n");
-            append_text("This device (kept without an SD card):\n");
-            append_text(("  " + describe(device) + "\n").c_str());
-            append_text(("  Saved passwords: " + std::to_string(device.vault_files) + " (encrypted" +
-                         (vault::has_pin() ? ", PIN" : "") + ")\n").c_str());
-            append_text(("  SSH keys loaded: " + std::to_string(loaded_keys.size()) + "\n").c_str());
+            p.info = "This device: " + describe(device) + "\nSaved passwords: " + std::to_string(device.vault_files) +
+                     (vault::has_pin() ? " (PIN)" : "") + ", SSH keys: " + std::to_string(loaded_keys.size()) + "\n";
 
             refresh_display_now();
             if (sdcard::mount() == ESP_OK) {
                 settings_backup::Counts sd;
                 bool has_backup = settings_backup::read_backup_counts(restore_dir(), sd);
                 sdcard::unmount();
-                append_text(has_backup ? ("SD card backup: " + describe(sd) + "\n").c_str()
-                                       : "SD card: inserted, no backup yet\n");
+                p.info += has_backup ? "SD card backup: " + describe(sd) : std::string("SD card: no backup yet");
             } else {
-                append_text("SD card: not inserted\n");
+                p.info += "SD card: not inserted";
             }
 
-            append_text(" 1) Back up this device to SD card\n"
-                        " 2) Restore from SD card to this device\n"
-                        " 3) Load SSH keys from SD card\n"
-                        " 4) Erase all settings on this device\n"
-                        " 0) Back\n"
-                        "Select [0-4]: ");
-            wizard.choices = {"1", "2", "3", "4", "0"};
-            return true;
+            p.rows = {
+                ui::row("1", "Back up to SD card", LV_SYMBOL_UPLOAD),
+                ui::row("2", "Restore from SD card", LV_SYMBOL_DOWNLOAD),
+                ui::row("3", "Load SSH keys from SD card", LV_SYMBOL_SD_CARD),
+                ui::row("4", "Erase all settings", LV_SYMBOL_TRASH),
+                ui::back_row(),
+            };
+            p.rows[3].tone = ui::Tone::Danger;
+            break;
         }
         case WizardStep::StorageConfirmBackup:
-            append_text("Copy this device's settings to the SD card (replaces an older backup)? (y/n) [y]: ");
-            wizard.choices = {"y", "n"};
-            return true;
+            p.info = "Copy this device's settings to the SD card?\nAn older backup is replaced.";
+            p.rows = { ui::row("y", "Back up", LV_SYMBOL_UPLOAD), ui::row("n", "Cancel", LV_SYMBOL_CLOSE) };
+            p.selected = 0;   // "y"
+            break;
         case WizardStep::StorageConfirmRestore:
-            append_text("Replace this device's settings with the SD card backup? (y/n) [n]: ");
-            wizard.choices = {"n", "y"};
-            return true;
+            p.info = "Replace this device's settings with the SD card backup?";
+            p.rows = { ui::row("y", "Restore", LV_SYMBOL_DOWNLOAD), ui::row("n", "Keep them", LV_SYMBOL_CLOSE) };
+            p.rows[0].tone = ui::Tone::Danger;
+            p.selected = 1;   // "n"
+            break;
         case WizardStep::StorageConfirmErase:
-            append_text("Erase ALL profiles, networks, trusted servers, history and saved passwords? (y/n) [n]: ");
-            wizard.choices = {"n", "y"};
-            return true;
+            p.info = "Erase ALL profiles, networks, trusted servers, history and saved passwords?";
+            p.rows = { ui::row("y", "Erase everything", LV_SYMBOL_TRASH), ui::row("n", "Keep them", LV_SYMBOL_CLOSE) };
+            p.rows[0].tone = ui::Tone::Danger;
+            p.selected = 1;   // "n"
+            break;
         default:
             return false;
     }
+    show_page(p);
+    return true;
 }
 
 bool SSHTerminal::storage_step_input(const std::string& raw_input, const std::string& input)

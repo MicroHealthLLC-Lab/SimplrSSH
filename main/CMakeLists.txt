@@ -19,6 +19,9 @@ set(SOURCES
     "portal.cpp"
     "portal_client.cpp"
     "portal_menu.cpp"
+    "ui_page.cpp"
+    "ui_view.cpp"
+    "lv_mem_psram.c"
     "audio.cpp"
 )
 
@@ -79,6 +82,10 @@ idf_component_register(
     INCLUDE_DIRS ${INCLUDE_DIRS}
     REQUIRES ${REQUIRED_COMPONENTS}
 )
+
+# LVGL's allocator (CONFIG_LV_USE_CUSTOM_MALLOC) is only referenced from the lvgl library,
+# which links after this one: keep it in the image
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-u lv_malloc_core")
 
 # Add version number as compile definition
 target_compile_definitions(${COMPONENT_LIB} PRIVATE SIMPLRSSH_VERSION="${PROJECT_VER}")

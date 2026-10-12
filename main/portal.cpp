@@ -1109,40 +1109,6 @@ std::vector<Item> items(const Page& page)
     return out;
 }
 
-std::string item_text(const Page& page, const Item& item)
-{
-    if (item.kind == Item::SubmitForm) {
-        return page.forms.size() > 1 ? "[Send form " + std::to_string(item.index + 1) + "]" : std::string("[Send]");
-    }
-    if (item.kind == Item::Redirect) {
-        Url u;
-        return "Continue to " + (parse_url(page.redirect, u) ? u.host : std::string("the next page"));
-    }
-    if (item.kind == Item::LinkItem) {
-        return "Link: " + page.links[item.index].label;
-    }
-    const Field& f = page.fields[item.index];
-    std::string label = f.label + (f.required ? " *" : "");
-    switch (f.type) {
-        case FieldType::Checkbox:
-            return (f.checked ? "[x] " : "[ ] ") + label;
-        case FieldType::Radio:
-            return (f.checked ? "(*) " : "( ) ") + label;
-        case FieldType::Select:
-            return label + ": " + (f.options.empty() ? std::string("(no choices)") : f.options[f.selected].label) +
-                   "  (choose)";
-        case FieldType::Submit:
-        case FieldType::Image:
-            return "[" + f.label + "]";
-        case FieldType::Password:
-            return label + ": " + (f.value.empty() ? std::string("(empty)") : std::string(std::min<size_t>(f.value.size(), 12), '*'));
-        default: {
-            std::string shown = printable(f.value, 40);
-            return label + ": " + (shown.empty() ? std::string("(empty)") : shown);
-        }
-    }
-}
-
 void toggle(Page& page, int index)
 {
     if (index < 0 || (size_t)index >= page.fields.size()) {

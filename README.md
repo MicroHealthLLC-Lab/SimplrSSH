@@ -46,33 +46,38 @@ a Tab5, hold its reset button for about 2 seconds, until the green LED flashes q
 
 ## Configure
 
-The device starts at the home menu. Type a number and press Enter, or roll the trackball
-left/right (Tab5: Up/Down) to pick and press it. `0` goes back, and `menu` returns home from
-anywhere. To leave an app from any screen - even an SSH session or ChatGPT, where what you
-type goes to the server or the chat - press **Ctrl+Del** on the Tab5 keyboard, or swipe left
-and tap **Menu** (the T-Deck's keyboard has no Ctrl key).
+The device starts at the home menu. The bar at the top shows the page's title and, on the
+right, icons for an open SSH session, WiFi and the battery level. Every menu is a list of rows:
 
-```
-== SimplrSSH ==
- 1) WiFi
- 2) SSH servers
- 3) ChatGPT
- 4) Storage (device / SD card)
- 5) Security (PIN, server keys)
- 6) Power (sleep, turn off)
-```
+- **T-Deck**: roll the trackball to move the highlight and press it to open the row.
+- **Tab5**: Up / Down to move, Enter to open.
+- **Both**: tap a row, or type its number (and Enter). Drag to scroll a long page.
 
-1. **WiFi**: choose **1) WiFi** → **Scan and connect**, pick your network and type the
+To go back one level, pick **0 Back** or tap the arrow in the title bar; **Esc** cancels to the
+home menu, and `menu` returns home from anywhere. While a step works (scanning, connecting)
+its progress shows on the page. When a step asks a question, type the answer into the
+field under it and press Enter. To leave an app from any screen - even an SSH session or
+ChatGPT, where what you type goes to the server or the chat - press **Ctrl+Del** on the Tab5
+keyboard, or swipe left and tap **Menu** (the T-Deck's keyboard has no Ctrl key).
+
+The home menu: **1 WiFi**, **2 SSH servers**, **3 ChatGPT**, **4 Storage** (device / SD card),
+**5 Security** (PIN, server keys), **6 Power** (sleep, turn off) and **7 Console**, where you
+type commands (`help` lists them). You can also type a command straight at the home menu.
+
+1. **WiFi**: choose **1 WiFi** → **Scan and connect**, pick your network and type the
    password. It is saved, the menu comes back, and the device reconnects on its own from then
    on (after a restart too, also when it first asks for your PIN).
    If the network has a sign-in page (cafe, hotel, airport), see *Sign-in pages* below.
-2. **Add a server**: choose **2) SSH servers** → **Add**. Enter a name, host, port (Enter for
-   22) and username, then choose a password or an SSH key. Finish with **Save and connect**.
+2. **Add a server**: choose **2 SSH servers** → **Add**. Enter a name, host, port (Enter for
+   22) and username, then choose a password or an SSH key. The server's form then lists every
+   field: pick one to change it, then **Save** or **Save and connect**. **Edit** opens the same
+   form for a saved server.
 3. **Trust the server**: on the first connection you are shown the server's key fingerprint.
-   Type `y` to trust it. If that server's key ever changes, SimplrSSH refuses to connect.
+   Pick **Trust and connect** (or type `y`). If that server's key ever changes, SimplrSSH
+   refuses to connect.
 
 Saved passwords are encrypted on the device. For extra protection, set a PIN under
-**5) Security**. You then enter the PIN once after each restart.
+**5 Security**. You then enter the PIN once after each restart.
 
 ### Optional: SSH keys
 
@@ -90,48 +95,51 @@ type `storage keys` to load them.
 
 ### Optional: ChatGPT
 
-Choose **3) ChatGPT** and add your OpenAI API key. You can type it, or put it in a file named
+Choose **3 ChatGPT** and add your OpenAI API key. You can type it, or put it in a file named
 `openai.key` at the top of the SD card and load it from there. Messages are sent only to
 OpenAI, and only while you use ChatGPT.
 
 ## Use
 
-- **Connect**: go to **2) SSH servers** → **Connect** and pick a server. Once you are
+- **Connect**: go to **2 SSH servers** → **Connect** and pick a server. Once you are
   connected, everything you type goes to the server. On the Tab5 the session fills the screen
   as a full terminal (see below).
-- **Scroll**: roll the trackball up or down (Tab5: Sym+Up / Sym+Down), or drag on the screen.
-  Works everywhere: SSH, menus and ChatGPT. While you are scrolled back, new output doesn't
-  move the screen; scroll back to the bottom or start typing to follow it again.
+- **Scroll**: roll the trackball up or down (Tab5: Sym+Up / Sym+Down), or drag on the screen,
+  in SSH, the console and ChatGPT (in menus the trackball moves the highlight; dragging still
+  scrolls). While you are scrolled back, new output doesn't move the screen; scroll back to the
+  bottom or start typing to follow it again.
 - **Special keys**: swipe left to open a panel with Ctrl+C, Ctrl+D, Ctrl+Z, Tab and Esc. On
   the Tab5 keyboard just press them: Ctrl+letter, Tab and Esc go straight to the server.
-- **History**: roll the trackball left (older) or right (newer). Tab5: Up / Down.
+- **History**: in the console and SSH, roll the trackball left (older) or right (newer).
+  Tab5: Up / Down.
 - **Disconnect**: type `exit` to return to the menu (on the Tab5 this ends the shell on the
   server).
 - **Back to the menu from anywhere**: **Ctrl+Del** (Tab5), or swipe left and tap **Menu**
   (both boards). It ends an SSH session, closes ChatGPT (stopping a recording, reply or
   speech) or cancels a menu, clears the input line, and shows the home menu.
-- **ChatGPT**: type to chat, or hold the trackball (Tab5: hold Ctrl) to speak and let
-  go to send. Start talking
+- **ChatGPT**: the chat looks like a messaging app - your messages on the right, ChatGPT's on
+  the left. Type to chat, or hold the trackball (Tab5: hold Ctrl) to speak and let go to send.
+  The back arrow in the title bar (or `exit`) leaves the chat. Start talking
   once `* Recording` shows. Your speech is transcribed by OpenAI's speech-to-text model, then
   sent as your message to the chat model you picked. If the microphone picks up nothing, the
   device says so and doesn't upload the recording. Press **Esc** (T-Deck: swipe left, then Esc)
   to stop a recording, a reply being written, or a reply being read aloud.
 - **Sign-in pages (captive portals)**: in a cafe or hotel, the WiFi may connect but let
-  nothing through until you accept its terms on a web page. Choose **1) WiFi** → **5) Sign in**
-  (or type `portal`). SimplrSSH loads that page and lists what's on it as a numbered menu:
-  pick a number to tick a checkbox (`[x]`), choose a radio button or list entry, type into a
-  field (Enter keeps it, `-` clears it), press a button (`[Connect]`) or follow a link. `t`
-  shows the page's text again, `r` starts over and checks the connection, `0` leaves. After a
-  form is sent it checks the internet and says *Signed in* once it works. It runs only when
+  nothing through until you accept its terms on a web page. Choose **1 WiFi** → **5 Sign in**
+  (or type `portal`). SimplrSSH loads that page and shows it as a form: its text on top, then a
+  row for each thing on it. Pick a row to tick a box, choose an option, fill in a field (Enter
+  keeps it, `-` clears it), press a button (such as *Connect*) or follow a link. **Start again**
+  reloads and checks the connection, **0 Back** leaves. After a form is sent it checks the
+  internet and says *Signed in* once it works. It runs only when
   you ask, nothing from the page is saved, and pages that need JavaScript (some hotel and
   chain portals) can't work - accept on your phone and use its hotspot instead.
-- **Back up**: choose **4) Storage** → **Back up** to copy your settings to the SD card.
-- **Sleep**: choose **6) Power** → **Sleep**, or type `sleep`. The screen and WiFi turn off;
+- **Back up**: choose **4 Storage** → **Back up** to copy your settings to the SD card.
+- **Sleep**: choose **6 Power** → **Sleep**, or type `sleep`. The screen and WiFi turn off;
   press any key or touch the screen to wake it (T-Deck: the trackball works too). The key or
   touch that wakes it does nothing else. WiFi reconnects by itself, and with a PIN set the
   saved passwords are locked again. Close an SSH session first (`exit`): while connected,
   `sleep` and `shutdown` are sent to the server.
-- **Turn off**: choose **6) Power** → **Turn off**, or type `shutdown` (or `poweroff`).
+- **Turn off**: choose **6 Power** → **Turn off**, or type `shutdown` (or `poweroff`).
   Command history is saved first. *Tab5*: the Tab5 switches itself off; press the power button
   to turn it on. On USB power it may stay on - then it sleeps instead. *T-Deck*: the screen,
   keyboard, SD card and radio lose power and the processor goes into deep sleep (a very small
@@ -155,7 +163,7 @@ Sym+Up / Sym+Down are Page Up / Page Down.
 
 | Keys | Does |
 |---|---|
-| Up / Down | Older / newer command; previous / next choice in a menu |
+| Up / Down | Move the highlight in a menu; older / newer command in the console |
 | Left / Right | Move the cursor. Sym+Left / Sym+Right: start / end of the line |
 | Sym+Up / Sym+Down | Scroll the screen |
 | Del | Delete the character at the cursor |
@@ -183,7 +191,7 @@ charges its battery over USB-C while SimplrSSH runs.
 
 - **WiFi won't connect**: make sure the network is 2.4 GHz and shows up in the scan.
 - **WiFi connects but SSH or ChatGPT can't reach anything** (cafe, hotel): the network wants
-  you to sign in first. Use **1) WiFi** → **5) Sign in** (`portal`). *Nothing to fill in or
+  you to sign in first. Use **1 WiFi** → **5 Sign in** (`portal`). *Nothing to fill in or
   press here*: the page needs JavaScript; sign in on a phone and use its hotspot. *Can't reach
   ... certificate*: the sign-in page uses a certificate the device can't verify, so it isn't
   opened.
@@ -192,15 +200,16 @@ charges its battery over USB-C while SimplrSSH runs.
   *No answer* / *no route*: wrong address, or the server isn't reachable from this WiFi (a
   different network or a guest network that isolates devices). A host name also shows the
   address it resolved to.
-- **"HOST KEY HAS CHANGED"**: if you know the server was reinstalled, run
-  `hosts forget <host>` and connect again.
+- **"HOST KEY HAS CHANGED"**: if you know the server was reinstalled, forget its key under
+  **5 Security** → **Trusted servers** (pick the server), or type `hosts forget <host>`, and
+  connect again.
 - **Keys not found**: the card must be FAT32 and the folder must be named `ssh_keys`.
 - **"Installed without its settings partition"**: the launcher installed the wrong file.
   Install `-launcher.bin` instead.
 - **Tab5 power button**: it is wired to the Tab5's power circuit, not to the processor, so
   SimplrSSH can't see it or make it put the device to sleep. A single press turns the Tab5 on,
   a quick double press turns it off. To sleep with wake on any key or touch, use `sleep` (or
-  **6) Power** → **Sleep**). If a press leaves the screen dark and the next press brings back
+  **6 Power** → **Sleep**). If a press leaves the screen dark and the next press brings back
   the boot messages, the Tab5 was off (no drain), not asleep.
 
 ## More

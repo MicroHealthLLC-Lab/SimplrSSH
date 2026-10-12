@@ -89,7 +89,6 @@ namespace portal
         int index;   // Field, form or link index
     };
     std::vector<Item> items(const Page& page);
-    std::string item_text(const Page& page, const Item& item);
 
     // Checkbox: flips it. Radio: picks it (others with its name in the form are cleared)
     void toggle(Page& page, int field);

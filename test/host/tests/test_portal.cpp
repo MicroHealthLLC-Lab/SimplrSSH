@@ -188,18 +188,35 @@ TEST(portal_page_links)
     CHECK_EQ(p.links[1].url, std::string("https://cafe.example/help"));
 }
 
-TEST(portal_items_and_text)
+// The field an item stands for (the menu draws its row from it)
+static const Field& item_field(const Page& p, const Item& item)
+{
+    CHECK(item.kind == Item::FieldItem);
+    return p.fields[item.index];
+}
+
+TEST(portal_items_in_page_order)
 {
     Page p = parse(CAFE);
     std::vector<Item> list = items(p);
     // email, tos, 2 radios, lang, note, button, 2 links (hidden token not listed)
     CHECK_EQ(list.size(), (size_t)9);
-    CHECK_EQ(item_text(p, list[0]), std::string("Email address *: (empty)"));
-    CHECK_EQ(item_text(p, list[1]), std::string("[ ] I agree to the terms *"));
-    CHECK_EQ(item_text(p, list[2]), std::string("(*) Free hour"));
-    CHECK_EQ(item_text(p, list[4]), std::string("lang: Francais  (choose)"));
-    CHECK_EQ(item_text(p, list[6]), std::string("[Connect now]"));
-    CHECK_EQ(item_text(p, list[7]), std::string("Link: terms"));
+    const Field& email = item_field(p, list[0]);
+    CHECK_EQ(email.label, std::string("Email address"));
+    CHECK(email.required && email.value.empty());
+    const Field& tos = item_field(p, list[1]);
+    CHECK(tos.type == FieldType::Checkbox && tos.required && !tos.checked);
+    const Field& free_hour = item_field(p, list[2]);
+    CHECK(free_hour.type == FieldType::Radio && free_hour.checked);
+    CHECK_EQ(free_hour.label, std::string("Free hour"));
+    const Field& lang = item_field(p, list[4]);
+    CHECK(lang.type == FieldType::Select);
+    CHECK_EQ(lang.options[lang.selected].label, std::string("Francais"));
+    const Field& button = item_field(p, list[6]);
+    CHECK(button.type == FieldType::Submit);
+    CHECK_EQ(button.label, std::string("Connect now"));
+    CHECK(list[7].kind == Item::LinkItem);
+    CHECK_EQ(p.links[list[7].index].label, std::string("terms"));
 }
 
 TEST(portal_toggle_and_required)
@@ -259,7 +276,7 @@ TEST(portal_form_without_button_gets_send_item)
     std::vector<Item> list = items(p);
     CHECK_EQ(list.size(), (size_t)4);
     CHECK(list[2].kind == Item::SubmitForm);
-    CHECK_EQ(item_text(p, list[2]), std::string("[Send form 1]"));
+    CHECK_EQ(list[2].index, 0);   // "Send form 1"
     CHECK_EQ(submit(p, 1, -1).url, std::string("http://portal.example/b?x="));
 }
 
@@ -283,7 +300,7 @@ TEST(portal_meta_refresh_redirect)
     CHECK_EQ(p.redirect, std::string("http://portal.example/splash?id=7"));
     CHECK(!has_controls(p));
     CHECK_EQ(items(p).size(), (size_t)1);
-    CHECK_EQ(item_text(p, items(p)[0]), std::string("Continue to portal.example"));
+    CHECK(items(p)[0].kind == Item::Redirect);
 }
 
 TEST(portal_script_redirects)
@@ -325,7 +342,7 @@ TEST(portal_label_fallbacks)
     Page filled = p;
     filled.fields[field_named(p, "pw")].value = "secret";
     std::vector<Item> list = items(filled);
-    CHECK_EQ(item_text(filled, list[4]), std::string("pw: ******"));
+    CHECK(item_field(filled, list[4]).type == FieldType::Password);
 }
 
 TEST(portal_option_without_value_sends_text)
