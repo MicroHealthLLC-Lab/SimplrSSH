@@ -222,5 +222,9 @@ charges its battery over USB-C while SimplrSSH runs.
 - Every push and pull request runs the **Tests** checks (`.github/workflows/tests.yml`). To run
   the unit tests on a PC (Linux, with `cmake`, `g++` and `libmbedtls-dev`):
   `cmake -S test/host -B build-host && cmake --build build-host && ctest --test-dir build-host`,
-  and `python3 -m unittest discover -s test/guards`.
+  and `python3 -m unittest discover -s test/guards`. `scripts/check.sh` runs both, then
+  `scripts/sast.sh` (MicroHealth's SAST rules; needs docker or nerdctl logged in to
+  MicroHealth's ECR; `SKIP_SAST=1` leaves it out).
+- The **Security scan** workflow (`.github/workflows/security-scan.yml`) runs SAST, Trivy, an
+  SBOM and ZAP DAST and writes one report; see [SECURITY.md](SECURITY.md).
 - Contributor rules are in [AI_RULES.md](AI_RULES.md).

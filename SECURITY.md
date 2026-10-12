@@ -110,10 +110,27 @@ a release waits for it to pass on the same commit. Security-relevant gates:
   audit (esp-idf-sbom, NVD) of ESP-IDF, its libraries and the components of both images that
   blocks on new high/critical findings.
 
-Outside the Tests workflow, `.github/workflows/sast.yml` runs MicroHealth's shared static
-analysis nightly (and on demand): Opengrep with MicroHealth's rules
-(`MicroHealthLLC/sast-rules`, pinned by commit). It is report-only; findings go to GitHub code
-scanning and to MicroHealth's security reports.
+Outside the Tests workflow, `.github/workflows/security-scan.yml` runs MicroHealth's shared
+security scan (`MicroHealthLLC/sast-rules`, pinned by commit) on every push to `main` and
+`integration`, every pull request, nightly and on demand: SAST (Opengrep with MicroHealth's
+rules), Trivy (dependencies, secrets and misconfiguration in the repository), a CycloneDX SBOM
+and ZAP DAST, in parallel, ending in one `security-report` (each scanner's status and counts by
+severity). Every scanner is on. A scanner that was on and left no report fails the run; a count
+is shown only for a scanner that ran, so "did not run" never reads as "found nothing". It does
+not gate releases (the Tests workflow does), and findings are not a release blocker unless the
+Tests audit also reports them. SimplrSSH is firmware with no web endpoint, so ZAP has nothing
+to scan unless `ZAP_TARGET_URL` is set; until then the report shows ZAP as not run, with the
+reason. Trivy does not understand ESP-IDF component locks; the CVE audit above remains the
+check for the firmware's own components. SAST findings also go to GitHub code scanning.
+Only full scans of `main` feed MicroHealth's security reports: `integration`'s are kept apart
+and never ingested, and a pull request's stay run artifacts (SAST there reports only what is
+new against the base).
+
+The same SAST rules run locally: `scripts/sast.sh` (copied unchanged from
+`MicroHealthLLC/sast-rules`; it reads the workflow's pin) and `scripts/check.sh`, which runs the
+guard and host tests first. It needs docker or nerdctl logged in to MicroHealth's ECR. A
+suppression is inline, with the full rule id and the reason it does not apply:
+`// noopengrep: <rule-id> — <reason>`.
 
 Found while introducing these checks:
 
