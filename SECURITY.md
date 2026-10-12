@@ -110,6 +110,11 @@ a release waits for it to pass on the same commit. Security-relevant gates:
   audit (esp-idf-sbom, NVD) of ESP-IDF, its libraries and the components of both images that
   blocks on new high/critical findings.
 
+Outside the Tests workflow, `.github/workflows/sast.yml` runs MicroHealth's shared static
+analysis nightly (and on demand): Opengrep with MicroHealth's rules
+(`MicroHealthLLC/sast-rules`, pinned by commit). It is report-only; findings go to GitHub code
+scanning and to MicroHealth's security reports.
+
 Found while introducing these checks:
 
 | Finding | Status |
