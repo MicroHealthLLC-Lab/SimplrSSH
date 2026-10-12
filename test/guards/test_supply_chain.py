@@ -4,6 +4,7 @@ digest, and every ESP-IDF component to an exact version recorded in each board's
 (dependencies.lock for the T-Deck, dependencies.lock.esp32p4 for the Tab5).
 """
 
+import os
 import re
 import unittest
 
@@ -157,6 +158,33 @@ class ComponentsPinned(unittest.TestCase):
         build = repo.read(".github", "workflows", "build.yml")
         ci = re.search(r"ESP_IDF_VERSION:\s*v([\d.]+)", build).group(1)
         self.assertTrue(idf.lstrip("~^=") == ci, f"manifest idf {idf} vs CI v{ci}")
+
+
+class SecurityScan(unittest.TestCase):
+    """One security workflow: MicroHealth's shared security-scan (SAST, Trivy, SBOM, ZAP DAST),
+    every scanner on, and the same rules locally through scripts/sast.sh."""
+
+    SHARED = re.compile(r"uses:\s*MicroHealthLLC/sast-rules/\.github/workflows/security-scan\.yml@([0-9a-f]{40})")
+
+    def test_one_security_scan_calls_the_shared_workflow(self):
+        text = repo.read(".github", "workflows", "security-scan.yml")
+        self.assertRegex(text, self.SHARED)
+        callers = [n for n, t in repo.workflows().items() if "MicroHealthLLC/sast-rules/" in t]
+        self.assertEqual(callers, [".github/workflows/security-scan.yml"],
+                         "SAST, Trivy, SBOM and ZAP run from the one security-scan workflow")
+
+    def test_every_scanner_on(self):
+        text = repo.read(".github", "workflows", "security-scan.yml")
+        for scanner in ("sast", "trivy", "sbom", "zap"):
+            with self.subTest(scanner=scanner):
+                self.assertNotRegex(text, rf"(?m)^\s*{scanner}:\s*false", "every scanner stays on")
+        self.assertIn("zap_target: ${{ vars.ZAP_TARGET_URL }}", text)
+
+    def test_local_sast_uses_the_pinned_rules(self):
+        sast = repo.path("scripts", "sast.sh")
+        self.assertTrue(os.access(sast, os.X_OK), "scripts/sast.sh must be executable")
+        self.assertIn("MicroHealthLLC/sast-rules", repo.read("scripts", "sast.sh"))
+        self.assertIn("scripts/sast.sh", repo.read("scripts", "check.sh"))
 
 
 if __name__ == "__main__":

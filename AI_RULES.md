@@ -212,6 +212,13 @@ only while no SSH session is open; in a session they go to the server.
   unit-tests, persistence, build (both boards: RAM budget, zero compiler warnings in `main/`, no
   key material), audit (CVEs), network-surface (linked symbols, generated sdkconfig), secret-scan.
   The code-quality workflow stays advisory.
+- The **Security scan** workflow (`.github/workflows/security-scan.yml`) calls MicroHealth's
+  shared `security-scan.yml` (`MicroHealthLLC/sast-rules`, pinned by commit): SAST, Trivy,
+  SBOM and ZAP DAST, one report. Every scanner stays on (test/guards/test_supply_chain.py,
+  `SecurityScan`). Before pushing run `scripts/check.sh` (guards, host tests, then
+  `scripts/sast.sh` with the same rules); if SAST can't run locally, say so in the PR.
+  `scripts/sast.sh` is copied from sast-rules unchanged; never edit it. Suppress a finding
+  only inline, with the full rule id and why it does not apply.
 - Tests live in `test/`: `test/host` compiles hardware-independent firmware sources unchanged
   for Linux against in-memory stand-ins for NVS, partitions and logging (`idf_stubs/`,
   `fake_idf.cpp`); `test/guards` holds Python checks of the rules in this file. Keep logic that
