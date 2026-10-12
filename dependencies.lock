@@ -255,6 +255,7 @@ direct_dependencies:
 - espressif/esp_bsp_generic
 - espressif/esp_codec_dev
 - espressif/esp_lcd_touch_gt911
+- espressif/led_strip
 - idf
 - lvgl/lvgl
 - skuodi/libssh2_esp
