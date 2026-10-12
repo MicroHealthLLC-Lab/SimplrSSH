@@ -132,6 +132,17 @@ guard and host tests first. It needs docker or nerdctl logged in to MicroHealth'
 suppression is inline, with the full rule id and the reason it does not apply:
 `// noopengrep: <rule-id> — <reason>`.
 
+The repository is public: anyone can read, clone and fork it, and nothing more. Its GitHub
+settings (not in the tree; change them only on purpose): issues, wiki, discussions and projects
+are off; only collaborators can open pull requests; workflows from an outside contributor's
+fork wait for approval; the default workflow token is read-only and cannot approve pull
+requests (each workflow declares what it writes); a ruleset stops deletion and force-pushes of
+`main` and `integration` (repository admins bypass it); secret scanning with push protection,
+Dependabot alerts and private vulnerability reporting are on. The security scan needs
+`secrets.AWS_ROLE` on this repository or shared with it by the organization (an org secret
+limited to private repositories never reaches a public one), and the role's OIDC trust must
+include `repo:MicroHealthLLC/SimplrSSH`.
+
 Found while introducing these checks:
 
 | Finding | Status |
