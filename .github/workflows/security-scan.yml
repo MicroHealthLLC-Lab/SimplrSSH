@@ -34,7 +34,7 @@ concurrency:
 jobs:
   security:
     permissions: {contents: read, actions: read, security-events: write, id-token: write}
-    uses: MicroHealthLLC/sast-rules/.github/workflows/security-scan.yml@341cd54bc0aae9359fa56965281d45ad58ce812c # v2026.10.5
+    uses: MicroHealthLLC/sast-rules/.github/workflows/security-scan.yml@48333102caf28297366cff377b8471646ceef51a # v2026.10.13
     with:
       aws_region: ${{ vars.AWS_REGION_EAST_1 }}
       s3_bucket: ${{ vars.SECURITY_REPORTS_S3_BUCKET }}
