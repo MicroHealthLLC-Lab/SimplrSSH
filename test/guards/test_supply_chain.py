@@ -73,6 +73,19 @@ class ActionsPinned(unittest.TestCase):
                 with self.subTest(workflow=name, image=ref):
                     self.assertRegex(ref, r"@sha256:[0-9a-f]{64}$")
 
+    def test_run_images_pulled_with_retries(self):
+        # A registry hiccup (Docker Hub auth timeout) must not fail the gate: `docker run`
+        # takes its image from an *_IMAGE variable that a retry loop pulled first.
+        for name, text in repo.workflows().items():
+            code = re.sub(r"(?m)\s#\s.*$", "", text).replace("\\\n", " ")
+            for cmd in re.findall(r"docker run\b[^\n]*", code):
+                with self.subTest(workflow=name, run=cmd[:60]):
+                    self.assertNotRegex(cmd, r"\s[\w.-]+/[\w.-]+:[\w.-]+@sha256:",
+                                        "run images through an *_IMAGE variable")
+                    for var in re.findall(r'"\$(\w*IMAGE\w*)"', cmd):
+                        self.assertRegex(code, r'for attempt in [^\n]*\n\s*docker pull "\$' + var + r'" && exit 0',
+                                         f"pull ${var} with retries before running it")
+
     def test_workflows_default_to_read_only_token(self):
         for name, text in repo.workflows().items():
             with self.subTest(workflow=name):
