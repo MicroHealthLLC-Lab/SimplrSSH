@@ -101,7 +101,10 @@ only while no SSH session is open; in a session they go to the server.
   screen as printable ASCII (`portal::printable()`); on-screen strings in the source are ASCII.
 - Keep the attack surface closed: station-only WiFi, IPv4, no listening sockets. Settings
   live in `sdkconfig.defaults` with a comment explaining each one.
-- CI actions are pinned to commit SHAs and the build image to a digest; keep it that way.
+- CI actions are pinned to commit SHAs and the build image to a digest; keep it that way. The
+  one named exception, by the owner's decision: MicroHealth's `sast-rules` workflows are called
+  `@main` (its release branch), so the security scan always runs the newest release
+  (`SAST_RULES_AT_MAIN` in `test/guards/test_supply_chain.py`; nothing else may use it).
 
 ## Persistence
 
@@ -213,11 +216,12 @@ only while no SSH session is open; in a session they go to the server.
   key material), audit (CVEs), network-surface (linked symbols, generated sdkconfig), secret-scan.
   The code-quality workflow stays advisory.
 - The **Security scan** workflow (`.github/workflows/security-scan.yml`) calls MicroHealth's
-  shared `security-scan.yml` (`MicroHealthLLC/sast-rules`, pinned by commit): SAST, Trivy,
+  shared `security-scan.yml` (`MicroHealthLLC/sast-rules`, called `@main` — its release branch, so every run
+  uses the newest release with no pin to move): SAST, Trivy,
   SBOM and ZAP DAST, one report. Every scanner stays on (test/guards/test_supply_chain.py,
   `SecurityScan`). Before pushing run `scripts/check.sh` (guards, host tests, then
   `scripts/sast.sh` with the same rules); if SAST can't run locally, say so in the PR.
-  `scripts/sast.sh` is copied from sast-rules unchanged; never edit it. Suppress a finding
+  `scripts/sast.sh` is copied from sast-rules unchanged (it resolves the same `@main`); never edit it. Suppress a finding
   only inline, with the full rule id and why it does not apply.
 - Tests live in `test/`: `test/host` compiles hardware-independent firmware sources unchanged
   for Linux against in-memory stand-ins for NVS, partitions and logging (`idf_stubs/`,

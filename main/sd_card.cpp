@@ -298,7 +298,7 @@ int sdcard::load_ssh_keys(SSHTerminal* terminal)
         }
         
         // Check if file has .pem or .PEM extension (case-insensitive)
-        size_t name_len = strlen(entry->d_name);
+        size_t name_len = strnlen(entry->d_name, sizeof(entry->d_name));
         if (name_len < 5) {
             ESP_LOGD(TAG, "Skipping file (name too short): %s", entry->d_name);
             continue;
@@ -317,6 +317,7 @@ int sdcard::load_ssh_keys(SSHTerminal* terminal)
         snprintf(filepath, sizeof(filepath), "%s/%s", keys_dir, entry->d_name);
         
         // Open and read the key file
+        // noopengrep: mh.gitlab.c_misc_rule-fopen-open - single-user device, FAT on the SD card has no links or permissions to race; what is read is size-checked and parsed before use
         FILE* f = fopen(filepath, "rb");
         if (!f) {
             ESP_LOGE(TAG, "Failed to open key file: %s", filepath);

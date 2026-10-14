@@ -78,6 +78,19 @@ A full sweep for malicious code, unexpected data flows and vulnerabilities.
 | At boot the peripheral power pin (GPIO 10) and chip selects pulsed low while being configured, and the SD card was initialised immediately after power-on: a card talked to while its supply is coming up or dipping can damage its internal tables and become unreadable | Pins get their level before becoming outputs (no glitch); 250 ms settle before the SD card is touched; boot mount uses the same 10 MHz clock as the runtime mount |
 | Reading the card could write to it (boot created `/ssh_keys`) | Mounts are read-only by default (a disk driver that refuses writes); only backup and deleting `openai.key` mount writable; the card is never formatted |
 
+### SAST review (2026-10-14)
+
+The security scan's first runs reported 37 Opengrep findings (Trivy: none). Each was checked
+by hand:
+
+| Finding | Outcome |
+|---|---|
+| A backup's header counts were read with `sscanf("%d")`: a huge number on the SD card overflowed `int` (undefined behaviour) | Parsed with `strtol`, 0 to 99999, else the backup is refused (host-tested) |
+| `strncpy` into the WiFi config, `atoi` on menu numbers, unbounded `strlen` on a network header and an SD file name, `strlen` on constants | `snprintf`, `strtol`, `strnlen` with the field's limit, `sizeof` / `snprintf`'s length |
+| `check_outdated.py` passed a built URL to `urlopen` (which also opens `file://`) | Only the two `https://` API prefixes are fetched; the call is suppressed inline |
+| A private key in README.md | Documentation naming the PEM header line, not a key; reworded |
+| 21 more: `memcpy` between fixed-size buffers, `strlen` on strings the firmware built, `fopen` on the SD card (TOCTOU) | Not applicable (fixed sizes, NUL-terminated by construction, FAT has no links or other users): suppressed inline with the full rule id and the reason |
+
 ### Usability change (2026-09-27)
 
 Requiring a master PIN before any password could be saved meant networks silently weren't
@@ -105,13 +118,17 @@ a release waits for it to pass on the same commit. Security-relevant gates:
   servers, OTA (including the Tab5 co-processor's), Bluetooth, mDNS or access-point code, must
   link CA-bundle TLS verification, SSH host key checks and RAM-only WiFi credential storage,
   and its generated sdkconfig must keep SoftAP, DHCP server, IPv6 and Bluetooth off.
-- **Supply chain**: actions pinned by SHA and images by digest (enforced), components installed
+- **Supply chain**: actions pinned by SHA and images by digest (enforced; the one named
+  exception is MicroHealth's own `sast-rules` workflows, called `@main` by the owner's decision
+  so the security scan always runs the newest release — `SAST_RULES_AT_MAIN` in
+  `test/guards/test_supply_chain.py`), components installed
   only at the locked versions with verified hashes (each board has its own lock file), and a CVE
   audit (esp-idf-sbom, NVD) of ESP-IDF, its libraries and the components of both images that
   blocks on new high/critical findings.
 
 Outside the Tests workflow, `.github/workflows/security-scan.yml` runs MicroHealth's shared
-security scan (`MicroHealthLLC/sast-rules`, pinned by commit) on every push to `main` and
+security scan (`MicroHealthLLC/sast-rules`, called `@main`: its release branch, so every run uses the
+newest release with no pin to move) on every push to `main` and
 `integration`, every pull request, nightly and on demand: SAST (Opengrep with MicroHealth's
 rules), Trivy (dependencies, secrets and misconfiguration in the repository), a CycloneDX SBOM
 and ZAP DAST, in parallel, ending in one `security-report` (each scanner's status and counts by
@@ -127,10 +144,21 @@ and never ingested, and a pull request's stay run artifacts (SAST there reports 
 new against the base).
 
 The same SAST rules run locally: `scripts/sast.sh` (copied unchanged from
-`MicroHealthLLC/sast-rules`; it reads the workflow's pin) and `scripts/check.sh`, which runs the
+`MicroHealthLLC/sast-rules`; it resolves the workflow's `@main` reference to sast-rules' newest commit) and `scripts/check.sh`, which runs the
 guard and host tests first. It needs docker or nerdctl logged in to MicroHealth's ECR. A
 suppression is inline, with the full rule id and the reason it does not apply:
 `// noopengrep: <rule-id> — <reason>`.
+
+The repository is public: anyone can read, clone and fork it, and nothing more. Its GitHub
+settings (not in the tree; change them only on purpose): issues, wiki, discussions and projects
+are off; only collaborators can open pull requests; workflows from an outside contributor's
+fork wait for approval; the default workflow token is read-only and cannot approve pull
+requests (each workflow declares what it writes); a ruleset stops deletion and force-pushes of
+`main` and `integration` (repository admins bypass it); secret scanning with push protection,
+Dependabot alerts and private vulnerability reporting are on. The security scan needs
+`secrets.AWS_ROLE` on this repository or shared with it by the organization (an org secret
+limited to private repositories never reaches a public one), and the role's OIDC trust must
+include `repo:MicroHealthLLC/SimplrSSH`.
 
 Found while introducing these checks:
 

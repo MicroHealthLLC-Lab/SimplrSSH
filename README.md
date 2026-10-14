@@ -88,8 +88,8 @@ Saved passwords are encrypted on the device. For extra protection, set a PIN und
    saved encrypted), or press Enter if it has none. If a key needs a passphrase you didn't
    save, SimplrSSH asks for it when you connect.
 
-Keys must be RSA in PEM format (the file starts with `-----BEGIN RSA PRIVATE KEY-----`). A key
-starting with `-----BEGIN OPENSSH PRIVATE KEY-----` can be converted on your computer, keeping
+Keys must be RSA in PEM format (the file's first line reads `BEGIN RSA PRIVATE KEY`). A key
+whose first line reads `BEGIN OPENSSH PRIVATE KEY` can be converted on your computer, keeping
 its passphrase: `ssh-keygen -p -m PEM -f mykey`. If you add a card while the device is running,
 type `storage keys` to load them.
 

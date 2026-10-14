@@ -113,6 +113,7 @@ static bool derive_key(const uint8_t* password, size_t password_len, const uint8
               mbedtls_md_hmac_finish(&ctx, u) == 0;
 
     if (ok) {
+        // noopengrep: mh.gitlab.c_buffer_rule-memcpy-CopyMemory - both buffers are KEY_LEN bytes
         memcpy(out, u, KEY_LEN);
         for (uint32_t i = 1; i < iterations && ok; i++) {
             ok = mbedtls_md_hmac_reset(&ctx) == 0 &&
@@ -193,6 +194,7 @@ static esp_err_t write_key_record(const std::string* pin, const uint8_t* data_ke
     const uint32_t iterations = pin ? PIN_ITERATIONS : DEVICE_ITERATIONS;
 
     uint8_t record[KEY_RECORD_LEN];
+    // noopengrep: mh.gitlab.c_buffer_rule-memcpy-CopyMemory - 4-byte magic into a KEY_RECORD_LEN record
     memcpy(record, pin ? MAGIC_PIN : MAGIC_DEVICE, 4);
     record[4] = iterations & 0xFF;
     record[5] = (iterations >> 8) & 0xFF;
@@ -260,6 +262,7 @@ static esp_err_t create_new_vault()
     esp_fill_random(data_key, KEY_LEN);
     esp_err_t err = write_key_record(NULL, data_key);
     if (err == ESP_OK) {
+        // noopengrep: mh.gitlab.c_buffer_rule-memcpy-CopyMemory - both buffers are KEY_LEN bytes
         memcpy(s_data_key, data_key, KEY_LEN);
         s_unlocked = true;
         s_has_pin = false;
@@ -293,6 +296,7 @@ bool vault::init()
 
     uint8_t data_key[KEY_LEN];
     if (read_key_record(NULL, data_key) == ESP_OK) {
+        // noopengrep: mh.gitlab.c_buffer_rule-memcpy-CopyMemory - both buffers are KEY_LEN bytes
         memcpy(s_data_key, data_key, KEY_LEN);
         s_unlocked = true;
         mbedtls_platform_zeroize(data_key, sizeof(data_key));
@@ -325,6 +329,7 @@ esp_err_t vault::unlock(const std::string& pin)
     uint8_t data_key[KEY_LEN];
     esp_err_t err = read_key_record(&pin, data_key);
     if (err == ESP_OK) {
+        // noopengrep: mh.gitlab.c_buffer_rule-memcpy-CopyMemory - both buffers are KEY_LEN bytes
         memcpy(s_data_key, data_key, KEY_LEN);
         s_unlocked = true;
     }

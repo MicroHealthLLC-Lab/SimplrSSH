@@ -38,7 +38,7 @@ static esp_err_t on_event(esp_http_client_event_t* evt)
     }
     Capture* c = (Capture*)evt->user_data;
     if (strcasecmp(evt->header_key, "Set-Cookie") == 0) {
-        if (c->set_cookies.size() < MAX_SET_COOKIES && strlen(evt->header_value) <= MAX_COOKIE_BYTES + 512) {
+        if (c->set_cookies.size() < MAX_SET_COOKIES && strnlen(evt->header_value, MAX_COOKIE_BYTES + 513) <= MAX_COOKIE_BYTES + 512) {
             c->set_cookies.push_back(evt->header_value);
         }
     } else if (strcasecmp(evt->header_key, "Location") == 0) {

@@ -222,8 +222,8 @@ esp_err_t SSHTerminal::init_wifi(const char* ssid, const char* password)
     xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
 
     wifi_config_t wifi_config = {};
-    strncpy((char*)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid) - 1);
-    strncpy((char*)wifi_config.sta.password, password, sizeof(wifi_config.sta.password) - 1);
+    snprintf((char*)wifi_config.sta.ssid, sizeof(wifi_config.sta.ssid), "%s", ssid);
+    snprintf((char*)wifi_config.sta.password, sizeof(wifi_config.sta.password), "%s", password);
     wifi_config.sta.threshold.authmode = password[0] ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
     wifi_config.sta.pmf_cfg.capable = true;
     wifi_config.sta.pmf_cfg.required = false;
@@ -573,7 +573,9 @@ void SSHTerminal::append_log(const char* text)
     bool follow = terminal_follow && !touch_scrolling(terminal_output);
     int32_t view_y = lv_obj_get_scroll_y(terminal_output);
     const char* current = lv_textarea_get_text(terminal_output);
+    // noopengrep: mh.gitlab.c_buffer_rule-strlen-wcslen - LVGL keeps the textarea text NUL-terminated; text is a C string the firmware built
     size_t current_len = strlen(current);
+    // noopengrep: mh.gitlab.c_buffer_rule-strlen-wcslen - text is a C string the firmware built (checked non-NULL above)
     size_t add_len = strlen(text);
     if (add_len > SCROLLBACK_KEEP) {
         text += add_len - SCROLLBACK_KEEP;
@@ -1951,6 +1953,7 @@ esp_err_t SSHTerminal::ssh_authenticate_pubkey(const char* username, const char*
 
     int rc;
     int waits = 0;
+    // noopengrep: mh.gitlab.c_buffer_rule-strlen-wcslen - username is a profile's std::string (c_str(), NUL-terminated)
     while ((rc = libssh2_userauth_publickey_frommemory(session, username, strlen(username),
                                                          NULL, 0,  // public key (derived from the private key)
                                                          privkey_data, privkey_len,
@@ -1994,6 +1997,7 @@ esp_err_t SSHTerminal::ssh_open_channel()
     const int cols = term ? term->cols() : pty_cols;
     const int rows = term ? term->rows() : pty_rows;
     waits = 0;
+    // noopengrep: mh.gitlab.c_buffer_rule-strlen-wcslen - term_type is a string literal
     while ((rc = libssh2_channel_request_pty_ex(channel, term_type, strlen(term_type), NULL, 0, cols, rows, 0, 0)) ==
                LIBSSH2_ERROR_EAGAIN &&
            (waitsocket(ssh_socket, session) > 0 || ++waits < SSH_MAX_WAITS)) {
@@ -2328,6 +2332,7 @@ void SSHTerminal::toggle_side_panel()
 
 void SSHTerminal::send_special_key(const char* sequence)
 {
+    // noopengrep: mh.gitlab.c_buffer_rule-strlen-wcslen - sequence comes from the firmware's own key tables (string literals)
     if (!sequence || strlen(sequence) == 0) {
         toggle_side_panel();
         return;
@@ -2385,6 +2390,7 @@ void SSHTerminal::send_special_key(const char* sequence)
     }
     
     if (ssh_connected && channel) {
+        // noopengrep: mh.gitlab.c_buffer_rule-strlen-wcslen - sequence comes from the firmware's own key tables (string literals)
         write_channel(sequence, strlen(sequence));
     } else {
         ESP_LOGW(TAG, "Cannot send special key - not connected");

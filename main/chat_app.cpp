@@ -923,6 +923,7 @@ bool SSHTerminal::chat_step_input(const std::string& raw_input, const std::strin
                 std::string problem = "No openai.key file at the top of the SD card.";
                 for (const char* name : {"openai.key", "openai.key.txt", "openai.txt"}) {
                     std::string path = std::string(sdcard::MOUNT_POINT) + "/" + name;
+                    // noopengrep: mh.gitlab.c_misc_rule-fopen-open - single-user device, FAT on the SD card has no links or permissions to race; what is read is size-checked and parsed before use
                     FILE* f = fopen(path.c_str(), "rb");
                     if (f) {
                         char buf[1024];
