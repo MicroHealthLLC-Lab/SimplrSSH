@@ -105,13 +105,17 @@ a release waits for it to pass on the same commit. Security-relevant gates:
   servers, OTA (including the Tab5 co-processor's), Bluetooth, mDNS or access-point code, must
   link CA-bundle TLS verification, SSH host key checks and RAM-only WiFi credential storage,
   and its generated sdkconfig must keep SoftAP, DHCP server, IPv6 and Bluetooth off.
-- **Supply chain**: actions pinned by SHA and images by digest (enforced), components installed
+- **Supply chain**: actions pinned by SHA and images by digest (enforced; the one named
+  exception is MicroHealth's own `sast-rules` workflows, called `@main` by the owner's decision
+  so the security scan always runs the newest release — `SAST_RULES_AT_MAIN` in
+  `test/guards/test_supply_chain.py`), components installed
   only at the locked versions with verified hashes (each board has its own lock file), and a CVE
   audit (esp-idf-sbom, NVD) of ESP-IDF, its libraries and the components of both images that
   blocks on new high/critical findings.
 
 Outside the Tests workflow, `.github/workflows/security-scan.yml` runs MicroHealth's shared
-security scan (`MicroHealthLLC/sast-rules`, pinned by commit) on every push to `main` and
+security scan (`MicroHealthLLC/sast-rules`, called `@main`: its release branch, so every run uses the
+newest release with no pin to move) on every push to `main` and
 `integration`, every pull request, nightly and on demand: SAST (Opengrep with MicroHealth's
 rules), Trivy (dependencies, secrets and misconfiguration in the repository), a CycloneDX SBOM
 and ZAP DAST, in parallel, ending in one `security-report` (each scanner's status and counts by
@@ -127,7 +131,7 @@ and never ingested, and a pull request's stay run artifacts (SAST there reports 
 new against the base).
 
 The same SAST rules run locally: `scripts/sast.sh` (copied unchanged from
-`MicroHealthLLC/sast-rules`; it reads the workflow's pin) and `scripts/check.sh`, which runs the
+`MicroHealthLLC/sast-rules`; it resolves the workflow's `@main` reference to sast-rules' newest commit) and `scripts/check.sh`, which runs the
 guard and host tests first. It needs docker or nerdctl logged in to MicroHealth's ECR. A
 suppression is inline, with the full rule id and the reason it does not apply:
 `// noopengrep: <rule-id> — <reason>`.

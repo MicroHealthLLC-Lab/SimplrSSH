@@ -11,6 +11,18 @@ import unittest
 import repo
 
 USES = re.compile(r"^\s*(?:-\s*)?uses:\s*([^\s#]+)", re.M)
+PINNED = re.compile(r"^[\w.-]+/[\w./-]+@[0-9a-f]{40}$")
+
+# The ONE exception to SHA pinning, by the owner's decision: MicroHealth's shared security
+# workflows are called @main. sast-rules' main IS its release branch (every scan change pushed
+# there is released), and its workflows check out their own rules at the commit the job runs
+# (the OIDC job_workflow_sha), so @main runs the newest reviewed release with no pin to move.
+# Exactly that repository's workflows at exactly `main`; every other ref stays SHA-pinned.
+SAST_RULES_AT_MAIN = re.compile(r"^MicroHealthLLC/sast-rules/\.github/workflows/[a-z0-9-]+\.yml@main$")
+
+
+def pinned_or_named_exception(ref):
+    return bool(PINNED.match(ref) or SAST_RULES_AT_MAIN.match(ref))
 
 
 class ActionsPinned(unittest.TestCase):
@@ -20,8 +32,25 @@ class ActionsPinned(unittest.TestCase):
                 if ref.startswith("./"):
                     continue                      # Reusable workflow in this repository
                 with self.subTest(workflow=name, uses=ref):
-                    self.assertRegex(ref, r"^[\w.-]+/[\w./-]+@[0-9a-f]{40}$",
-                                     "pin actions to a full commit SHA (with a # vX.Y.Z comment)")
+                    self.assertTrue(pinned_or_named_exception(ref),
+                                    f"{ref}: pin actions to a full commit SHA (with a # vX.Y.Z comment)")
+
+    def test_only_sast_rules_at_main_is_unpinned(self):
+        sha = "206c21cb92451de53799c90ea7dedada6c256e2e"
+        for ok in ("MicroHealthLLC/sast-rules/.github/workflows/security-scan.yml@main",
+                   f"actions/checkout@{sha}",
+                   f"MicroHealthLLC/sast-rules/.github/workflows/security-scan.yml@{sha}"):
+            with self.subTest(accepted=ok):
+                self.assertTrue(pinned_or_named_exception(ok))
+        for bad in ("actions/checkout@main",
+                    "MicroHealthLLC/other-repo/.github/workflows/security-scan.yml@main",
+                    "MicroHealthLLC/sast-rules/.github/workflows/security-scan.yml@integration",
+                    "MicroHealthLLC/sast-rules/.github/workflows/security-scan.yml@v2026.10.15",
+                    "MicroHealthLLC/sast-rules/.github/workflows/security-scan.yml@main2",
+                    "MicroHealthLLC/sast-rules/action@main",
+                    "evil/MicroHealthLLC/sast-rules/.github/workflows/security-scan.yml@main"):
+            with self.subTest(refused=bad):
+                self.assertFalse(pinned_or_named_exception(bad))
 
     def test_container_images_pinned_by_digest(self):
         image = re.compile(r"(?:docker (?:pull|run)[^\n]*?\s|esp_idf_version:\s*)"
@@ -164,7 +193,8 @@ class SecurityScan(unittest.TestCase):
     """One security workflow: MicroHealth's shared security-scan (SAST, Trivy, SBOM, ZAP DAST),
     every scanner on, and the same rules locally through scripts/sast.sh."""
 
-    SHARED = re.compile(r"uses:\s*MicroHealthLLC/sast-rules/\.github/workflows/security-scan\.yml@([0-9a-f]{40})")
+    # @main: the newest sast-rules release (see SAST_RULES_AT_MAIN above).
+    SHARED = re.compile(r"uses:\s*MicroHealthLLC/sast-rules/\.github/workflows/security-scan\.yml@main(?:\s|$)")
 
     def test_one_security_scan_calls_the_shared_workflow(self):
         text = repo.read(".github", "workflows", "security-scan.yml")
@@ -180,7 +210,7 @@ class SecurityScan(unittest.TestCase):
                 self.assertNotRegex(text, rf"(?m)^\s*{scanner}:\s*false", "every scanner stays on")
         self.assertIn("zap_target: ${{ vars.ZAP_TARGET_URL }}", text)
 
-    def test_local_sast_uses_the_pinned_rules(self):
+    def test_local_sast_uses_the_same_rules(self):
         sast = repo.path("scripts", "sast.sh")
         self.assertTrue(os.access(sast, os.X_OK), "scripts/sast.sh must be executable")
         self.assertIn("MicroHealthLLC/sast-rules", repo.read("scripts", "sast.sh"))

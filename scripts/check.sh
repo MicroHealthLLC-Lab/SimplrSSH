@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The local check before a push: the guard tests and the host unit tests the
-# Tests workflow runs, then SAST with MicroHealth's rules at the commit
-# .github/workflows/security-scan.yml pins (scripts/sast.sh) — the same rules
+# Tests workflow runs, then SAST with MicroHealth's rules at the newest
+# release, the `@main` .github/workflows/security-scan.yml calls (scripts/sast.sh) — the same rules
 # CI's security scan runs. It does not build firmware (that needs ESP-IDF).
 #
 #   scripts/check.sh                # guards, host tests (cmake, g++, libmbedtls-dev), SAST
