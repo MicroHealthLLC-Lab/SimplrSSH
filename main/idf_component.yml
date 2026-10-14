@@ -27,6 +27,10 @@ dependencies:
     version: '3.0.3'   # Not used directly: esp_bsp_generic's led_indicator needs it; pinned
     rules:             # because the component manager re-solves and would take newer releases
       - if: 'target == esp32s3'
+  espressif/button:
+    version: '4.2.1'   # Not used directly: esp_bsp_generic needs it; pinned like led_strip
+    rules:             # (the re-solve took 4.2.2, published 2026-10-14)
+      - if: 'target == esp32s3'
   ## M5Stack Tab5 (esp32p4)
   espressif/m5stack_tab5:
     version: '1.3.1'   # Display (ILI9881C / ST7123 / ST7121), touch, IO expanders, codecs

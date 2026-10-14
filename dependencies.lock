@@ -252,6 +252,7 @@ dependencies:
       type: service
     version: 1.1.0
 direct_dependencies:
+- espressif/button
 - espressif/esp_bsp_generic
 - espressif/esp_codec_dev
 - espressif/esp_lcd_touch_gt911
