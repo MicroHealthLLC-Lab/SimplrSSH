@@ -31,8 +31,8 @@
 static const char *TAG = "BACKUP";
 
 static const char* const NAMESPACES[] = {"profiles", "wifi_nets", "known_hosts", "storage", "vault", "chat"};
-static const char* const HEADER = "SIMPLRSSH-BACKUP 1";
-static const char* const LEGACY_HEADER = "POCKETSSH-BACKUP 1";   // Same format, older name
+static const char HEADER[] = "SIMPLRSSH-BACKUP 1";
+static const char LEGACY_HEADER[] = "POCKETSSH-BACKUP 1";   // Same format, older name
 static const size_t MAX_LINE = 8300;     // "ns key s " + hex of a 4000-byte string
 static const size_t MAX_RECORDS = 1000;
 static const size_t MAX_BLOB = 1024;
@@ -178,6 +178,7 @@ esp_err_t settings_backup::backup(const std::string& dir, Counts& counts)
     std::vector<Record> records = read_device_records();
     counts = count_records(records);
 
+    // noopengrep: mh.gitlab.c_misc_rule-fopen-open - single-user device, FAT on the SD card has no links or permissions to race; what is read is size-checked and parsed before use
     FILE* f = fopen(path_in(dir, "settings.new").c_str(), "w");
     if (!f) {
         ESP_LOGE(TAG, "Cannot write to %s", dir.c_str());
@@ -210,10 +211,10 @@ esp_err_t settings_backup::backup(const std::string& dir, Counts& counts)
 static size_t header_length(const std::string& line)
 {
     if (line.rfind(HEADER, 0) == 0) {
-        return strlen(HEADER);
+        return sizeof(HEADER) - 1;
     }
     if (line.rfind(LEGACY_HEADER, 0) == 0) {
-        return strlen(LEGACY_HEADER);
+        return sizeof(LEGACY_HEADER) - 1;
     }
     return 0;
 }
@@ -234,8 +235,26 @@ static bool read_line(FILE* f, std::string& line)
     return !line.empty();
 }
 
+// The four counts after the header, each a number from 0 to MAX_COUNT
+static bool parse_counts(const char* s, settings_backup::Counts& counts)
+{
+    static const long MAX_COUNT = 99999;
+    int* fields[] = {&counts.profiles, &counts.networks, &counts.hosts, &counts.history};
+    for (int* field : fields) {
+        char* end = nullptr;
+        long v = strtol(s, &end, 10);
+        if (end == s || v < 0 || v > MAX_COUNT) {
+            return false;
+        }
+        *field = (int)v;
+        s = end;
+    }
+    return true;
+}
+
 bool settings_backup::read_backup_counts(const std::string& dir, Counts& counts)
 {
+    // noopengrep: mh.gitlab.c_misc_rule-fopen-open - single-user device, FAT on the SD card has no links or permissions to race; what is read is size-checked and parsed before use
     FILE* f = fopen(path_in(dir, "settings.dat").c_str(), "r");
     if (!f) {
         return false;
@@ -243,14 +262,14 @@ bool settings_backup::read_backup_counts(const std::string& dir, Counts& counts)
     std::string line;
     size_t header = 0;
     bool ok = read_line(f, line) && (header = header_length(line)) > 0 &&
-              sscanf(line.c_str() + header, "%d %d %d %d", &counts.profiles, &counts.networks,
-                     &counts.hosts, &counts.history) == 4;
+              parse_counts(line.c_str() + header, counts);
     fclose(f);
     return ok;
 }
 
 static bool parse_settings(const std::string& path, std::vector<Record>& records)
 {
+    // noopengrep: mh.gitlab.c_misc_rule-fopen-open - single-user device, FAT on the SD card has no links or permissions to race; what is read is size-checked and parsed before use
     FILE* f = fopen(path.c_str(), "r");
     if (!f) {
         return false;

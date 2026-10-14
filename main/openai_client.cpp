@@ -135,8 +135,10 @@ esp_err_t openai::chat(const std::string& key, const std::string& model, const s
         return ESP_ERR_NO_MEM;
     }
 
-    esp_http_client_handle_t client = open_post("chat/completions", key, "application/json", strlen(body));
-    bool ok = client && write_all(client, body, strlen(body));
+    // noopengrep: mh.gitlab.c_buffer_rule-strlen-wcslen - body is cJSON_PrintUnformatted's NUL-terminated output
+    size_t body_len = strlen(body);
+    esp_http_client_handle_t client = open_post("chat/completions", key, "application/json", body_len);
+    bool ok = client && write_all(client, body, body_len);
     cJSON_free(body);
     if (!client) {
         error = "Can't reach OpenAI (check WiFi)";
@@ -196,8 +198,10 @@ esp_err_t openai::transcribe(const std::string& key, const std::string& model, c
     uint8_t wav[44];
     auto put32 = [&wav](int at, uint32_t v) { for (int i = 0; i < 4; i++) wav[at + i] = (v >> (8 * i)) & 0xFF; };
     auto put16 = [&wav](int at, uint16_t v) { wav[at] = v & 0xFF; wav[at + 1] = v >> 8; };
+    // noopengrep: mh.gitlab.c_buffer_rule-memcpy-CopyMemory - fixed-size literals into fixed offsets of the 44-byte header
     memcpy(wav, "RIFF", 4); put32(4, 36 + data_len); memcpy(wav + 8, "WAVEfmt ", 8);
     put32(16, 16); put16(20, 1); put16(22, 1); put32(24, rate); put32(28, rate * 2); put16(32, 2); put16(34, 16);
+    // noopengrep: mh.gitlab.c_buffer_rule-memcpy-CopyMemory - fixed-size literal into a fixed offset of the 44-byte header
     memcpy(wav + 36, "data", 4); put32(40, data_len);
 
     std::string content_type = std::string("multipart/form-data; boundary=") + B;
@@ -240,8 +244,10 @@ esp_err_t openai::speak(const std::string& key, const std::string& model, const 
     if (!body) {
         return ESP_ERR_NO_MEM;
     }
-    esp_http_client_handle_t client = open_post("audio/speech", key, "application/json", strlen(body));
-    bool ok = client && write_all(client, body, strlen(body));
+    // noopengrep: mh.gitlab.c_buffer_rule-strlen-wcslen - body is cJSON_PrintUnformatted's NUL-terminated output
+    size_t body_len = strlen(body);
+    esp_http_client_handle_t client = open_post("audio/speech", key, "application/json", body_len);
+    bool ok = client && write_all(client, body, body_len);
     cJSON_free(body);
     if (!client) {
         error = "Can't reach OpenAI";
@@ -377,8 +383,8 @@ esp_err_t openai::list_models(const std::string& key, Models& out, std::string& 
     std::vector<std::pair<long long, std::string>> found;  // Every model, (created, id)
     const char* start = body;
     const char* end = body + len;
-    const char* data = "\"data\"";
-    const char* p = std::search(start, end, data, data + strlen(data));
+    static const char data[] = "\"data\"";
+    const char* p = std::search(start, end, data, data + sizeof(data) - 1);
     while (p < end && found.size() < 400) {
         const char* open = std::find(p, end, '{');
         const char* close = std::find(open, end, '}');

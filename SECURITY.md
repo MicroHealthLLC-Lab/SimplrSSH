@@ -78,6 +78,19 @@ A full sweep for malicious code, unexpected data flows and vulnerabilities.
 | At boot the peripheral power pin (GPIO 10) and chip selects pulsed low while being configured, and the SD card was initialised immediately after power-on: a card talked to while its supply is coming up or dipping can damage its internal tables and become unreadable | Pins get their level before becoming outputs (no glitch); 250 ms settle before the SD card is touched; boot mount uses the same 10 MHz clock as the runtime mount |
 | Reading the card could write to it (boot created `/ssh_keys`) | Mounts are read-only by default (a disk driver that refuses writes); only backup and deleting `openai.key` mount writable; the card is never formatted |
 
+### SAST review (2026-10-14)
+
+The security scan's first runs reported 37 Opengrep findings (Trivy: none). Each was checked
+by hand:
+
+| Finding | Outcome |
+|---|---|
+| A backup's header counts were read with `sscanf("%d")`: a huge number on the SD card overflowed `int` (undefined behaviour) | Parsed with `strtol`, 0 to 99999, else the backup is refused (host-tested) |
+| `strncpy` into the WiFi config, `atoi` on menu numbers, unbounded `strlen` on a network header and an SD file name, `strlen` on constants | `snprintf`, `strtol`, `strnlen` with the field's limit, `sizeof` / `snprintf`'s length |
+| `check_outdated.py` passed a built URL to `urlopen` (which also opens `file://`) | Only the two `https://` API prefixes are fetched; the call is suppressed inline |
+| A private key in README.md | Documentation naming the PEM header line, not a key; reworded |
+| 21 more: `memcpy` between fixed-size buffers, `strlen` on strings the firmware built, `fopen` on the SD card (TOCTOU) | Not applicable (fixed sizes, NUL-terminated by construction, FAT has no links or other users): suppressed inline with the full rule id and the reason |
+
 ### Usability change (2026-09-27)
 
 Requiring a master PIN before any password could be saved meant networks silently weren't

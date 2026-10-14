@@ -233,6 +233,25 @@ TEST(restore_rejects_untrusted_backups)
     expect_rejected(many);                                                  // Too many records
 }
 
+TEST(backup_counts_reject_bad_numbers)
+{
+    std::string dir = temp_dir();
+    settings_backup::Counts counts;
+    write_file(dir + "/settings.dat", "SIMPLRSSH-BACKUP 1 1 2 3\n");                // Three counts
+    CHECK(!settings_backup::read_backup_counts(dir, counts));
+    write_file(dir + "/settings.dat", "SIMPLRSSH-BACKUP 1 1 2 x 4\n");              // Not a number
+    CHECK(!settings_backup::read_backup_counts(dir, counts));
+    write_file(dir + "/settings.dat", "SIMPLRSSH-BACKUP 1 1 -2 3 4\n");             // Negative
+    CHECK(!settings_backup::read_backup_counts(dir, counts));
+    write_file(dir + "/settings.dat", "SIMPLRSSH-BACKUP 1 1 2 99999999999999999999 4\n");  // Overflows int
+    CHECK(!settings_backup::read_backup_counts(dir, counts));
+    write_file(dir + "/settings.dat", "SIMPLRSSH-BACKUP 1 1 2 3 4\r\n");           // Edited on Windows
+    CHECK(settings_backup::read_backup_counts(dir, counts));
+    CHECK_EQ(counts.profiles, 1);
+    CHECK_EQ(counts.history, 4);
+    remove_dir(dir);
+}
+
 TEST(restore_missing_backup_fails_cleanly)
 {
     factory_device();

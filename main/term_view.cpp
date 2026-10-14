@@ -516,13 +516,13 @@ void TermView::draw(lv_layer_t* layer)
 
     if (back > 0) {   // Scrolled back: how far, top right
         static char marker[24];
-        snprintf(marker, sizeof(marker), " -%d ", back);
+        int marker_len = snprintf(marker, sizeof(marker), " -%d ", back);
         lv_draw_label_dsc_t dsc;
         lv_draw_label_dsc_init(&dsc);
         dsc.font = font;
         dsc.color = lv_color_black();
         dsc.text = marker;
-        int32_t w = (int32_t)strlen(marker) * cell_w;
+        int32_t w = (int32_t)marker_len * cell_w;
         lv_area_t a = {coords.x2 - w + 1, coords.y1, coords.x2, coords.y1 + cell_h - 1};
         fill(layer, a.x1, a.y1, a.x2, a.y2, lv_color_hex(0xFFFF00));
         lv_draw_label(layer, &dsc, &a);

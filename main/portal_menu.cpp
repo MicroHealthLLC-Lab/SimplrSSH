@@ -403,7 +403,7 @@ bool SSHTerminal::portal_step_input(const std::string& raw_input, const std::str
         case WizardStep::PortalPage: {
             std::string choice = lower(input);
             std::vector<portal::Item> items = portal::items(portal_page);
-            int n = is_number(choice) ? atoi(choice.c_str()) : -1;
+            int n = is_number(choice) ? (int)strtol(choice.c_str(), nullptr, 10) : -1;
             if (choice == "0") {
                 wizard_done();
             } else if (choice == "r") {
@@ -437,7 +437,7 @@ bool SSHTerminal::portal_step_input(const std::string& raw_input, const std::str
 
         case WizardStep::PortalOption: {
             portal::Field& f = portal_page.fields[portal_field];
-            int n = is_number(input) ? atoi(input.c_str()) : -1;
+            int n = is_number(input) ? (int)strtol(input.c_str(), nullptr, 10) : -1;
             if (n >= 1 && (size_t)n <= f.options.size()) {
                 f.selected = n - 1;
             } else if (n != 0) {

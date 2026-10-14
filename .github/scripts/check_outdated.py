@@ -21,11 +21,18 @@ REGISTRY_API = "https://components.espressif.com/api/components/{}"
 IDF_RELEASE_API = "https://api.github.com/repos/espressif/esp-idf/releases/latest"
 
 
+ALLOWED_PREFIXES = ("https://components.espressif.com/api/", "https://api.github.com/")
+
+
 def fetch_json(url):
+    # Only the two HTTPS APIs above: never file:// or another host
+    if not url.startswith(ALLOWED_PREFIXES):
+        raise ValueError(f"refusing to fetch {url!r}")
     request = urllib.request.Request(url, headers={"User-Agent": "simplrssh-dependency-check"})
     token = os.environ.get("GITHUB_TOKEN")
-    if token and "api.github.com" in url:
+    if token and url.startswith("https://api.github.com/"):
         request.add_header("Authorization", f"Bearer {token}")
+    # noopengrep: mh.gitlab.python_urlopen_rule-urllib-urlopen, mh.opengrep.python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected - only the two https:// prefixes above  # noqa: E501
     with urllib.request.urlopen(request, timeout=30) as response:
         return json.load(response)
 
