@@ -340,5 +340,37 @@ class Ui(unittest.TestCase):
                         self.fail("non-ASCII byte: use plain ASCII or an escape sequence")
 
 
+class Contrast(unittest.TestCase):
+    """WCAG 2.2 AAA 1.4.6: theme text colors reach 7:1 against the fills they sit on."""
+
+    @staticmethod
+    def theme():
+        text = repo.read("main", "include", "ui_view.hpp")
+        return {k: int(v, 16) for k, v in re.findall(r"uint32_t (\w+) = 0x([0-9A-Fa-f]{6});", text)}
+
+    @staticmethod
+    def lum(h):
+        chan = [((h >> s) & 255) / 255 for s in (16, 8, 0)]
+        chan = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in chan]
+        return 0.2126 * chan[0] + 0.7152 * chan[1] + 0.0722 * chan[2]
+
+    def ratio(self, a, b):
+        hi, lo = sorted((self.lum(a), self.lum(b)), reverse=True)
+        return (hi + 0.05) / (lo + 0.05)
+
+    def test_text_pairs_reach_7_to_1(self):
+        t = self.theme()
+        white = 0xFFFFFF
+        pairs = [(fg, bg) for fg in ("TEXT", "DIM", "DANGER", "OK", "WARN") for bg in ("BG", "SURFACE", "DIVIDER")
+                 ]
+        for fg, bg in pairs:
+            with self.subTest(fg=fg, bg=bg):
+                self.assertGreaterEqual(self.ratio(t[fg], t[bg]), 7.0)
+        for fg in (white, 0xE6EDF3):  # white and the selected row's dim text on the accent fill
+            with self.subTest(fg=hex(fg), bg="ACCENT_BG"):
+                self.assertGreaterEqual(self.ratio(fg, t["ACCENT_BG"]), 7.0)
+        self.assertGreaterEqual(self.ratio(t["ACCENT"], t["BG"]), 3.0, "focus outline needs 3:1 (1.4.11)")
+
+
 if __name__ == "__main__":
     unittest.main()

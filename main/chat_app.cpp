@@ -320,7 +320,7 @@ static void init_chat_styles()
     lv_style_set_bg_opa(&s_bubble, LV_OPA_COVER);
     lv_style_set_text_font(&s_bubble, board::ui().input);
     lv_style_init(&s_user);
-    lv_style_set_bg_color(&s_user, lv_color_hex(theme::ACCENT));
+    lv_style_set_bg_color(&s_user, lv_color_hex(theme::ACCENT_BG));
     lv_style_set_text_color(&s_user, lv_color_white());
     lv_style_init(&s_ai);
     lv_style_set_bg_color(&s_ai, lv_color_hex(theme::DIVIDER));

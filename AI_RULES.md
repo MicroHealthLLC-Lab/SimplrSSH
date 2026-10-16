@@ -22,7 +22,7 @@ trackball / arrow keys + Enter, a touch, or by typing the row's number; a prompt
 sits under its question. A home menu (`menu` anywhere, `exit` back to it; Ctrl+Del on the Tab5
 and the side panel's Menu button return to it from any screen, ending SSH or ChatGPT), each app
 a menu of short prompts; ChatGPT as message bubbles; the console (text log) for typed commands.
-Dark theme, symbol-font icons, no images or animations. SSH sessions: on the T-Deck, scrolling
+Dark theme with 7:1 text contrast (`theme::` colors, checked by the `Contrast` guard; text never sits on `ACCENT`, use `ACCENT_BG`), symbol-font icons, no images or animations. SSH sessions: on the T-Deck, scrolling
 text and a line sent with Enter; on the Tab5, a full-screen xterm (TUI programs) with every key
 sent to the server. Keep the T-Deck's terminal as it is.
 Local commands that are also shell commands (`sleep`, `shutdown`, `poweroff`, `power`) are taken
