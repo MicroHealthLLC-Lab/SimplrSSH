@@ -499,3 +499,18 @@ TEST(portal_wipe_clears_everything)
     CHECK(r.body.empty());
     CHECK(r.url.empty());
 }
+
+TEST(portal_unclosed_option_before_a_skipped_select)
+{
+    // The second select is disabled (no field): the open option must close into the first one
+    Page p = parse("<form action=/a><select name=a><option>x<select name=b disabled><option>y</select>"
+                   "<select name=c><option>z</select></form>");
+    int a = field_named(p, "a");
+    int c = field_named(p, "c");
+    CHECK(a >= 0 && c >= 0);
+    CHECK_EQ(p.fields[a].options.size(), (size_t)1);
+    CHECK_EQ(p.fields[a].options[0].value, std::string("x"));
+    CHECK_EQ(p.fields[c].options.size(), (size_t)1);
+    CHECK_EQ(p.fields[c].options[0].value, std::string("z"));
+    CHECK_EQ(field_named(p, "b"), -1);
+}

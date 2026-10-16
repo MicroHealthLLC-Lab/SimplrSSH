@@ -864,6 +864,7 @@ namespace
             f.label = f.value.empty() ? "Submit" : printable(f.value, MAX_LABEL);
             button_field = add_field(f, attrs);
         } else if (tag == "select") {
+            finish_option();   // An unclosed <option> belongs to the previous select
             Field f;
             f.type = FieldType::Select;
             select_field = add_field(f, attrs);
