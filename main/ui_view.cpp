@@ -17,7 +17,7 @@ static lv_style_t s_mark;         // Checkbox / radio / on-off marks at a row's 
 static bool s_styles_ready = false;
 
 static const uint32_t SELECTED_TEXT = 0xFFFFFF;
-static const uint32_t SELECTED_DIM = 0xD0DEF5;
+static const uint32_t SELECTED_DIM = 0xE6EDF3;
 
 static void init_styles()
 {
@@ -44,7 +44,7 @@ static void init_styles()
     lv_style_set_flex_track_place(&s_row, LV_FLEX_ALIGN_CENTER);
 
     lv_style_init(&s_row_selected);
-    lv_style_set_bg_color(&s_row_selected, lv_color_hex(theme::ACCENT));
+    lv_style_set_bg_color(&s_row_selected, lv_color_hex(theme::ACCENT_BG));
     lv_style_set_bg_opa(&s_row_selected, LV_OPA_COVER);
     lv_style_set_radius(&s_row_selected, ui.gap * 3 / 2);
     lv_style_set_border_color(&s_row_selected, lv_color_hex(theme::ACCENT));   // Same height as unselected
@@ -179,16 +179,16 @@ void UiView::set_back(bool shown)
 static void paint_mark(lv_obj_t* mark_label, ui::Mark mark, bool selected)
 {
     bool on = mark == ui::Mark::Checked || mark == ui::Mark::Chosen || mark == ui::Mark::On;
-    uint32_t fill = selected ? SELECTED_TEXT : theme::ACCENT;
+    uint32_t fill = selected ? SELECTED_TEXT : theme::ACCENT_BG;
     uint32_t edge = on ? fill : (selected ? SELECTED_DIM : theme::DIM);
     lv_obj_set_style_border_color(mark_label, lv_color_hex(edge), 0);
     if (mark == ui::Mark::On || mark == ui::Mark::Off) {
         lv_obj_set_style_bg_color(mark_label, lv_color_hex(on ? fill : theme::DIVIDER), 0);
-        lv_obj_set_style_text_color(mark_label, lv_color_hex(on ? (selected ? theme::ACCENT : SELECTED_TEXT) : theme::DIM), 0);
+        lv_obj_set_style_text_color(mark_label, lv_color_hex(on ? (selected ? theme::ACCENT_BG : SELECTED_TEXT) : theme::DIM), 0);
     } else {
         lv_obj_set_style_bg_color(mark_label, lv_color_hex(on ? fill : theme::BG), 0);
         lv_obj_set_style_bg_opa(mark_label, on || !selected ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-        lv_obj_set_style_text_color(mark_label, lv_color_hex(selected ? theme::ACCENT : SELECTED_TEXT), 0);
+        lv_obj_set_style_text_color(mark_label, lv_color_hex(selected ? theme::ACCENT_BG : SELECTED_TEXT), 0);
     }
 }
 

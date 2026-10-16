@@ -2288,7 +2288,7 @@ void SSHTerminal::create_side_panel()
         lv_obj_set_size(btn, ui.button_w, ui.button_h);
         lv_obj_align(btn, LV_ALIGN_TOP_MID, 0, (row++ + 1) * (ui.button_h + ui.gap + 1));
         lv_obj_set_style_bg_color(btn, lv_color_hex(theme::DIVIDER), 0);
-        lv_obj_set_style_bg_color(btn, lv_color_hex(theme::ACCENT), LV_STATE_PRESSED);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(theme::ACCENT_BG), LV_STATE_PRESSED);
         lv_obj_set_style_shadow_width(btn, 0, 0);
         
         lv_obj_t* btn_label = lv_label_create(btn);
