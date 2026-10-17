@@ -143,7 +143,7 @@ class OutdatedVersionOrder(unittest.TestCase):
 
 class FirmwareChecks(unittest.TestCase):
     def test_key_material_detected(self):
-        # Assembled at run time so the source holds nothing that looks like a key (secret-scan)
+        # Assembled at run time so the source holds nothing that looks like a key (secret scanners)
         marker = b"OPENSSH " + b"PRIVATE KEY-----"
         pem = b"-----BEGIN " + marker + b"\n" + b"QUJD" * 13 + b"\n-----END " + marker + b"\n"
         self.assertEqual(check_firmware.key_material(b"\x00junk" + pem), ["PEM private key"])

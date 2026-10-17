@@ -69,7 +69,7 @@ class ActionsPinned(unittest.TestCase):
             for var, ref in re.findall(r"(?m)^\s*(\w*IMAGE\w*):\s*([\w.-]+/[^\s#]+:[^\s#]+)", code):
                 with self.subTest(workflow=name, variable=var):
                     self.assertRegex(ref, r"@sha256:[0-9a-f]{64}$")
-            for ref in re.findall(r"(?:espressif/idf|zricethezav/gitleaks|koalaman/shellcheck):[^\s'\"]*", code):
+            for ref in re.findall(r"(?:espressif/idf|koalaman/shellcheck):[^\s'\"]*", code):
                 with self.subTest(workflow=name, image=ref):
                     self.assertRegex(ref, r"@sha256:[0-9a-f]{64}$")
 

@@ -213,7 +213,8 @@ only while no SSH session is open; in a session they go to the server.
   on every push and pull request, and releases wait for it. Its jobs, in order: install
   (components match each board's lock), lint (actionlint, ruff, cppcheck), typecheck,
   unit-tests, persistence, build (both boards: RAM budget, zero compiler warnings in `main/`, no
-  key material), audit (CVEs), network-surface (linked symbols, generated sdkconfig), secret-scan.
+  key material), audit (CVEs), network-surface (linked symbols, generated sdkconfig). Secret scanning runs in the
+  Security scan workflow below (Trivy's secret scanner over the repository), not in Tests.
   The code-quality workflow stays advisory.
 - The **Security scan** workflow (`.github/workflows/security-scan.yml`) calls MicroHealth's
   shared `security-scan.yml` (`MicroHealthLLC/sast-rules`, called `@main` — its release branch, so every run

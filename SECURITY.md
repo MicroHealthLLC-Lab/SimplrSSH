@@ -109,8 +109,10 @@ a release waits for it to pass on the same commit. Security-relevant gates:
 - **Secrets**: host tests check that the vault never stores or logs plaintext, that tampered or
   moved ciphertext is rejected, that PINs use the slow key derivation, and that typed passwords
   are redacted from echo and history; guard tests reject log statements that print user input
-  or secrets; gitleaks scans the new commits; the built images are scanned for private keys and
-  API keys (with a planted-key negative control).
+  or secrets; the built images are scanned for private keys and API keys (with a planted-key
+  negative control). Secret scanning of the source runs in the Security scan workflow
+  (`.github/workflows/security-scan.yml`, Trivy's secret scanner over the repository on every
+  push to `main` and `integration` and every pull request), not in Tests.
 - **Untrusted SD card input**: restore tests feed damaged and hostile backups (unknown
   namespaces, the device-key namespace, oversized or malformed records) and check that the
   device is left unchanged.
