@@ -124,9 +124,11 @@ a release waits for it to pass on the same commit. Security-relevant gates:
   exception is MicroHealth's own `sast-rules` workflows, called `@main` by the owner's decision
   so the security scan always runs the newest release — `SAST_RULES_AT_MAIN` in
   `test/guards/test_supply_chain.py`), components installed
-  only at the locked versions with verified hashes (each board has its own lock file), and a CVE
-  audit (esp-idf-sbom, NVD) of ESP-IDF, its libraries and the components of both images that
-  blocks on new high/critical findings.
+  only at the locked versions with verified hashes (each board has its own lock file).
+
+The CVE audit of the firmware (esp-idf-sbom, NVD: ESP-IDF, its libraries and the components of
+both images, failing on new high/critical findings and on any known exploited one) is not part
+of Tests: it runs as the `firmware-audit` job of the Security scan workflow below.
 
 Outside the Tests workflow, `.github/workflows/security-scan.yml` runs MicroHealth's shared
 security scan (`MicroHealthLLC/sast-rules`, called `@main`: its release branch, so every run uses the
@@ -134,12 +136,13 @@ newest release with no pin to move) on every push to `main` and
 `integration`, every pull request, nightly and on demand: SAST (Opengrep with MicroHealth's
 rules), Trivy (dependencies, secrets and misconfiguration in the repository), a CycloneDX SBOM
 and ZAP DAST, in parallel, ending in one `security-report` (each scanner's status and counts by
-severity). Every scanner is on. A scanner that was on and left no report fails the run; a count
+severity), and beside them the `firmware-audit` job (the firmware CVE audit above). Every
+scanner is on. A scanner that was on and left no report fails the run; a count
 is shown only for a scanner that ran, so "did not run" never reads as "found nothing". It does
-not gate releases (the Tests workflow does), and findings are not a release blocker unless the
-Tests audit also reports them. SimplrSSH is firmware with no web endpoint, so ZAP has nothing
+not gate releases (the Tests workflow does): a failing `firmware-audit` or any other finding
+here does not stop a release on its own. SimplrSSH is firmware with no web endpoint, so ZAP has nothing
 to scan unless `ZAP_TARGET_URL` is set; until then the report shows ZAP as not run, with the
-reason. Trivy does not understand ESP-IDF component locks; the CVE audit above remains the
+reason. Trivy does not understand ESP-IDF component locks; `firmware-audit` remains the
 check for the firmware's own components. SAST findings also go to GitHub code scanning.
 Only full scans of `main` feed MicroHealth's security reports: `integration`'s are kept apart
 and never ingested, and a pull request's stay run artifacts (SAST there reports only what is

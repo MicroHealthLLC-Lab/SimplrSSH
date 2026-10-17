@@ -1,4 +1,4 @@
-# Reviewed vulnerabilities the Tests workflow's audit job accepts (check_audit.py).
+# Reviewed vulnerabilities the Security scan workflow's firmware-audit job accepts (check_audit.py).
 # One per line: <CVE id> <package> <reason>. Anything HIGH/CRITICAL and not listed here
 # fails the audit, as does any listed CVE that appears in CISA's Known Exploited list.
 # Remove a line as soon as the fix ships (the audit warns when a listed CVE is gone).

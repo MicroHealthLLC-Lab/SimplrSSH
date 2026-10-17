@@ -223,6 +223,18 @@ class SecurityScan(unittest.TestCase):
                 self.assertNotRegex(text, rf"(?m)^\s*{scanner}:\s*false", "every scanner stays on")
         self.assertIn("zap_target: ${{ vars.ZAP_TARGET_URL }}", text)
 
+    def test_security_scans_run_only_in_security_scan(self):
+        # The Tests workflow is for tests; the firmware CVE audit (which Trivy cannot do: it
+        # does not read ESP-IDF component locks) runs in security-scan.yml instead.
+        scan = repo.read(".github", "workflows", "security-scan.yml")
+        self.assertRegex(scan, r"(?m)^  firmware-audit:\s*$")
+        self.assertIn("esp-idf-sbom", scan)
+        self.assertIn(".github/scripts/check_audit.py", scan)
+        tests = repo.read(".github", "workflows", "tests.yml")
+        for marker in ("esp-idf-sbom", "check_audit.py", "gitleaks"):
+            with self.subTest(marker=marker):
+                self.assertNotIn(marker, re.sub(r"(?m)^\s*#.*$", "", tests))
+
     def test_local_sast_uses_the_same_rules(self):
         sast = repo.path("scripts", "sast.sh")
         self.assertTrue(os.access(sast, os.X_OK), "scripts/sast.sh must be executable")

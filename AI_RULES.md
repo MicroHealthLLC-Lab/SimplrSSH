@@ -213,13 +213,14 @@ only while no SSH session is open; in a session they go to the server.
   on every push and pull request, and releases wait for it. Its jobs, in order: install
   (components match each board's lock), lint (actionlint, ruff, cppcheck), typecheck,
   unit-tests, persistence, build (both boards: RAM budget, zero compiler warnings in `main/`, no
-  key material), audit (CVEs), network-surface (linked symbols, generated sdkconfig). Secret scanning runs in the
-  Security scan workflow below (Trivy's secret scanner over the repository), not in Tests.
+  key material), network-surface (linked symbols, generated sdkconfig). No security scan runs
+  in Tests: secret scanning and the firmware CVE audit run in the Security scan workflow below.
   The code-quality workflow stays advisory.
 - The **Security scan** workflow (`.github/workflows/security-scan.yml`) calls MicroHealth's
   shared `security-scan.yml` (`MicroHealthLLC/sast-rules`, called `@main` — its release branch, so every run
   uses the newest release with no pin to move): SAST, Trivy,
-  SBOM and ZAP DAST, one report. Every scanner stays on (test/guards/test_supply_chain.py,
+  SBOM and ZAP DAST, one report; beside it its `firmware-audit` job (esp-idf-sbom CVEs of both
+  boards' images against the NVD, `.github/scripts/check_audit.py`). Every scanner stays on (test/guards/test_supply_chain.py,
   `SecurityScan`). Before pushing run `scripts/check.sh` (guards, host tests, then
   `scripts/sast.sh` with the same rules); if SAST can't run locally, say so in the PR.
   `scripts/sast.sh` is copied from sast-rules unchanged (it resolves the same `@main`); never edit it. Suppress a finding
