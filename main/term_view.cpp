@@ -39,10 +39,10 @@ static const uint8_t BOX_ARMS[128] = {
 // Quadrants of U+2596-U+259F (upper left 1, upper right 2, lower left 4, lower right 8)
 static const uint8_t QUADRANTS[10] = {4, 8, 1, 1 | 4 | 8, 1 | 8, 1 | 2 | 4, 1 | 2 | 8, 2, 2 | 4, 2 | 4 | 8};
 
-// 16 ANSI colors, readable on black
+// 16 ANSI colors; all but black reach 7:1 on the black background (WCAG 2.2 AAA 1.4.6, test_firmware_rules.py, `Contrast`)
 static const uint32_t ANSI[16] = {
-    0x000000, 0xCD3131, 0x0DBC79, 0xE5E510, 0x2472C8, 0xBC3FBC, 0x11A8CD, 0xE5E5E5,
-    0x666666, 0xF14C4C, 0x23D18B, 0xF5F543, 0x3B8EEA, 0xD670D6, 0x29B8DB, 0xFFFFFF,
+    0x000000, 0xDE7979, 0x0DBC79, 0xE5E510, 0x6199D7, 0xCF75CF, 0x11A8CD, 0xE5E5E5,
+    0x979797, 0xF36969, 0x23D18B, 0xF5F543, 0x4F99EC, 0xD670D6, 0x29B8DB, 0xFFFFFF,
 };
 
 static uint32_t palette(uint32_t index)
