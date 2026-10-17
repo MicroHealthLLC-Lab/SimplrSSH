@@ -120,6 +120,14 @@ class Bounds(unittest.TestCase):
         self.assertIn("MALLOC_CAP_SPIRAM", SRC["main/portal_client.cpp"])
 
 
+class KnownHosts(unittest.TestCase):
+    def test_host_key_records_not_read_into_a_fixed_buffer(self):
+        # A long host name made the record exceed a 160-byte buffer: the read failed, a changed
+        # key then looked like a new server (Unknown) instead of a mismatch
+        code = SRC[os.path.join("main", "known_hosts.cpp")]
+        self.assertEqual(re.findall(r"char value\[\d+\]", code), [])
+
+
 class Logging(unittest.TestCase):
     LOG = re.compile(r"ESP_LOG[EWIDV]\s*\(\s*(\w+)\s*,\s*([^;]*)\)\s*;")
     SENSITIVE = re.compile(r"\b\w*(password|passwd|passphrase|pin|secret|api_?key|private_?key|"

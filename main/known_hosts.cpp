@@ -21,6 +21,7 @@
 static const char *TAG = "KNOWN_HOSTS";
 static const char *NVS_NAMESPACE = "known_hosts";
 static const char FIELD_SEP = '\x1F';
+static const size_t MAX_RECORD = 1024;
 
 struct KnownHost {
     std::string nvs_key;
@@ -42,6 +43,21 @@ static std::string nvs_key_for(const std::string& host_port)
     snprintf(key, sizeof(key), "h%02x%02x%02x%02x%02x%02x%02x",
              hash[0], hash[1], hash[2], hash[3], hash[4], hash[5], hash[6]);
     return key;
+}
+
+// Reads a record of any length (a long host name makes it exceed a small fixed buffer)
+static bool read_record(nvs_handle_t handle, const char* key, std::string& value)
+{
+    size_t len = 0;
+    if (nvs_get_str(handle, key, NULL, &len) != ESP_OK || len == 0 || len > MAX_RECORD) {
+        return false;
+    }
+    value.assign(len, '\0');
+    if (nvs_get_str(handle, key, &value[0], &len) != ESP_OK) {
+        return false;
+    }
+    value.resize(len - 1);   // Drop the NUL terminator
+    return true;
 }
 
 static bool parse_record(const std::string& nvs_key, const std::string& value, KnownHost& out)
@@ -71,10 +87,9 @@ static std::vector<KnownHost> load_known_hosts()
     while (err == ESP_OK) {
         nvs_entry_info_t info;
         nvs_entry_info(it, &info);
-        char value[160];
-        size_t len = sizeof(value);
+        std::string value;
         KnownHost h;
-        if (nvs_get_str(handle, info.key, value, &len) == ESP_OK && parse_record(info.key, value, h)) {
+        if (read_record(handle, info.key, value) && parse_record(info.key, value, h)) {
             hosts.push_back(h);
         }
         err = nvs_entry_next(&it);
@@ -128,14 +143,13 @@ SSHTerminal::HostKeyStatus SSHTerminal::check_host_key(const std::string& host, 
     if (settings_nvs::open(NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) {
         return HostKeyStatus::Unknown;
     }
-    char value[160];
-    size_t len = sizeof(value);
+    std::string value;
     std::string nvs_key = nvs_key_for(host_port);
-    esp_err_t err = nvs_get_str(handle, nvs_key.c_str(), value, &len);
+    bool found = read_record(handle, nvs_key.c_str(), value);
     nvs_close(handle);
 
     KnownHost known;
-    if (err != ESP_OK || !parse_record(nvs_key, value, known) || known.host_port != host_port) {
+    if (!found || !parse_record(nvs_key, value, known) || known.host_port != host_port) {
         return HostKeyStatus::Unknown;
     }
     if (known.fingerprint == fingerprint && known.key_type == key_type) {
