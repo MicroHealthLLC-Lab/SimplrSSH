@@ -371,6 +371,15 @@ class Contrast(unittest.TestCase):
                 self.assertGreaterEqual(self.ratio(fg, t["ACCENT_BG"]), 7.0)
         self.assertGreaterEqual(self.ratio(t["ACCENT"], t["BG"]), 3.0, "focus outline needs 3:1 (1.4.11)")
 
+    def test_terminal_ansi_colors_reach_7_to_1_on_black(self):
+        text = repo.read("main", "term_view.cpp")
+        block = re.search(r"ANSI\[16\] = \{(.*?)\};", text, re.S).group(1)
+        colors = [int(v, 16) for v in re.findall(r"0x([0-9A-Fa-f]{6})", block)]
+        self.assertEqual(len(colors), 16)
+        for i, c in enumerate(colors[1:], 1):
+            with self.subTest(index=i):
+                self.assertGreaterEqual(self.ratio(c, 0), 7.0)
+
 
 if __name__ == "__main__":
     unittest.main()
