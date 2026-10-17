@@ -186,6 +186,12 @@ esp_err_t fetch(const Request& request, Cookies& cookies, Result& out)
                 wipe(req.body);   // 301/302/303: the next request is a plain GET
                 req.post = false;
             }
+            Url target;
+            if (req.post && url.https && parse_url(next, target) && !target.https) {
+                out.error = "The page tried to send what you typed over an unencrypted connection.";   // Never https -> http with a body
+                wipe(req);
+                return ESP_FAIL;
+            }
             req.referer = url.str();
             req.url = next;
             continue;
