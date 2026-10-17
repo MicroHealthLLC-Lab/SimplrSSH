@@ -7,12 +7,15 @@
 # is published from a commit that did not pass. No job is advisory: a red job blocks the
 # merge (make "Tests" a required check on main and integration) and the release.
 #
-# Modelled on TueriCXO's Tests gate (minus its PDF/UA accessibility job). The jobs run as a
-# strict ordered chain, each `needs` the one before it, so a failure stops everything after
-# it and the first red job is the one to read:
+# Modelled on TueriCXO's Tests gate (minus its PDF/UA accessibility job). install runs first
+# (it proves the locked components resolve); lint, typecheck, unit-tests and persistence then
+# each `needs` only install and run in parallel, and build `needs` every one of them, so no
+# firmware is built from a commit with a red gate. network-surface reads build's artifacts:
 #
-#   install → lint → typecheck → unit-tests ─┬─► build ──► network-surface
-#                                            └─► persistence
+#             ┌─► lint ────────┐
+#             ├─► typecheck ───┤
+#   install ──┼─► unit-tests ──┼─► build ──► network-surface
+#             └─► persistence ─┘
 #
 #   install          clean resolve in the pinned ESP-IDF image, for each board (T-Deck,
 #                    Tab5): the locked components install with verified hashes, the build
@@ -154,7 +157,7 @@ jobs:
   #    cleanly with warnings as errors (the full firmware compile is the build job).
   typecheck:
     name: typecheck
-    needs: lint
+    needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -172,7 +175,7 @@ jobs:
   #    and the CI scripts' tests.
   unit-tests:
     name: unit-tests
-    needs: typecheck
+    needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -192,7 +195,7 @@ jobs:
   #    restores; older records still load (AI_RULES.md, Persistence).
   persistence:
     name: persistence
-    needs: unit-tests
+    needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -213,7 +216,7 @@ jobs:
   #    material, proven able to fail by a negative control.
   build:
     name: build
-    needs: unit-tests
+    needs: [install, lint, typecheck, unit-tests, persistence]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

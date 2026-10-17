@@ -210,10 +210,11 @@ only while no SSH session is open; in a session they go to the server.
 - Match the surrounding style (4-space indent, `snake_case`, brace on its own line for
   functions, same line for control flow).
 - CI must build, and the **Tests** workflow (`.github/workflows/tests.yml`) must pass: it runs
-  on every push and pull request, and releases wait for it. Its jobs, in order: install
-  (components match each board's lock), lint (actionlint, ruff, cppcheck), typecheck,
-  unit-tests, persistence, build (both boards: RAM budget, zero compiler warnings in `main/`, no
-  key material), network-surface (linked symbols, generated sdkconfig). No security scan runs
+  on every push and pull request, and releases wait for it. Its jobs: install (components
+  match each board's lock) first; then lint (actionlint, ruff, cppcheck), typecheck,
+  unit-tests and persistence in parallel, each needing only install; then build (both boards:
+  RAM budget, zero compiler warnings in `main/`, no key material), which needs all of them;
+  then network-surface (linked symbols, generated sdkconfig) on build's artifacts. No security scan runs
   in Tests: secret scanning and the firmware CVE audit run in the Security scan workflow below.
   The code-quality workflow stays advisory.
 - The **Security scan** workflow (`.github/workflows/security-scan.yml`) calls MicroHealth's
