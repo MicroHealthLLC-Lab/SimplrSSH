@@ -303,7 +303,8 @@ static bool parse_settings(const std::string& path, std::vector<Record>& records
             ok = from_hex(value, r.value, true) && !r.value.empty() && r.value.size() <= MAX_BLOB;
         } else if (r.type == 'u') {
             ok = !value.empty() && value.size() <= 10 &&
-                 value.find_first_not_of("0123456789") == std::string::npos;
+                 value.find_first_not_of("0123456789") == std::string::npos &&
+                 strtoull(value.c_str(), NULL, 10) <= UINT32_MAX;   // 10 digits can exceed a u32
             r.value = value;
         } else {
             ok = false;
