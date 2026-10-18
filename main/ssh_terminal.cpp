@@ -1789,6 +1789,12 @@ esp_err_t SSHTerminal::ssh_begin(PendingSsh&& target)
         wipe_pending_ssh();
         return ESP_FAIL;
     }
+    if (t.port < 1 || t.port > 65535) {
+        // htons() would wrap it to another port, and known_hosts would key on the unwrapped value
+        append_text("ERROR: Port must be 1-65535.\n");
+        wipe_pending_ssh();
+        return ESP_FAIL;
+    }
     if (!ensure_libssh2_init()) {
         append_text("ERROR: libssh2 init failed\n");
         wipe_pending_ssh();
