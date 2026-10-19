@@ -471,6 +471,22 @@ TEST(portal_cookies_secure_path_replace_delete)
     CHECK_EQ(jar.size(), (size_t)0);
 }
 
+TEST(portal_cookie_path_matches_whole_segments)
+{
+    Url set, admin, admin_x, admin_q, other;
+    parse_url("http://p.example/", set);
+    parse_url("http://p.example/admin", admin);
+    parse_url("http://p.example/admin/x", admin_x);
+    parse_url("http://p.example/admin?a=1", admin_q);
+    parse_url("http://p.example/administrator", other);
+    Cookies jar;
+    jar.store("a=1; Path=/admin", set);
+    CHECK_EQ(jar.header_for(admin), std::string("a=1"));
+    CHECK_EQ(jar.header_for(admin_x), std::string("a=1"));
+    CHECK_EQ(jar.header_for(admin_q), std::string("a=1"));
+    CHECK_EQ(jar.header_for(other), std::string(""));
+}
+
 TEST(portal_cookie_jar_is_bounded)
 {
     Url u;

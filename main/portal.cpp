@@ -1325,6 +1325,11 @@ std::string Cookies::header_for(const Url& to) const
     for (const auto& c : jar) {
         bool host_ok = c.host_only ? to.host == c.domain : domain_match(to.host, c.domain);
         bool path_ok = to.path.compare(0, c.path.size(), c.path) == 0;
+        if (path_ok && c.path.back() != '/' && to.path.size() > c.path.size()) {
+            // RFC 6265 path-match: "/admin" covers "/admin/x" and "/admin?x", not "/administrator"
+            char next = to.path[c.path.size()];
+            path_ok = next == '/' || next == '?';
+        }
         if (host_ok && path_ok && (!c.secure || to.https)) {
             out += (out.empty() ? "" : "; ") + c.name + "=" + c.value;
         }
