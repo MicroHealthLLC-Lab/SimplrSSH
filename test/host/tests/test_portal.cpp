@@ -451,6 +451,19 @@ TEST(portal_cookies_host_and_domain)
     CHECK_EQ(jar.header_for(other), std::string(""));
 }
 
+TEST(portal_cookies_ip_host_has_no_parent_domain)
+{
+    Url gateway, neighbour;
+    parse_url("http://192.168.1.1/login", gateway);
+    parse_url("http://10.168.1.1/", neighbour);
+    Cookies jar;
+    jar.store("leak=1; Domain=168.1.1", gateway);   // Not the gateway's own address: refused
+    jar.store("own=1; Domain=192.168.1.1", gateway);
+    CHECK_EQ(jar.size(), (size_t)1);
+    CHECK_EQ(jar.header_for(gateway), std::string("own=1"));
+    CHECK_EQ(jar.header_for(neighbour), std::string(""));
+}
+
 TEST(portal_cookies_secure_path_replace_delete)
 {
     Url https_url, http_url, admin;
