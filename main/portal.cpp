@@ -1251,6 +1251,11 @@ Request submit(const Page& page, int form, int submitter)
 // Cookies (RAM only, gone when the sign-in ends)
 // ---------------------------------------------------------------------------
 
+static bool is_ipv4_literal(const std::string& host)
+{
+    return !host.empty() && std::all_of(host.begin(), host.end(), [](char c) { return isdigit((unsigned char)c) || c == '.'; });
+}
+
 static bool domain_match(const std::string& host, const std::string& domain)
 {
     return host == domain ||
@@ -1289,6 +1294,9 @@ void Cookies::store(const std::string& set_cookie, const Url& from)
         std::string value = aeq == std::string::npos ? "" : trim(a.substr(aeq + 1));
         if (key == "domain" && !value.empty()) {
             std::string d = lower(value[0] == '.' ? value.substr(1) : value);
+            if (is_ipv4_literal(from.host) && d != from.host) {
+                return;   // An address has no parent domain: "168.1.1" must not cover 10.168.1.1
+            }
             if (!domain_match(from.host, d) || (d != from.host && d.find('.') == std::string::npos)) {
                 return;   // Another site's (or a whole top-level domain's) cookie
             }
