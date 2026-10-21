@@ -1736,6 +1736,8 @@ int SSHTerminal::waitsocket(int socket_fd, LIBSSH2_SESSION *session)
 
 // Upper bound on waitsocket() rounds (2 s each) for one SSH protocol step
 static const int SSH_MAX_WAITS = 15;
+// Shorter for keystrokes: a stalled link must not freeze the keypad task for long
+static const int SSH_KEY_MAX_WAITS = 3;
 
 // libssh2 global state is initialized once and kept for the life of the app
 static bool ensure_libssh2_init()
@@ -2408,9 +2410,27 @@ void SSHTerminal::send_special_key(const char* sequence)
 // Sends raw bytes (control keys) to the SSH session
 void SSHTerminal::write_channel(const char* data, size_t len)
 {
+    size_t nwritten = 0;
+    int waits = 0;
+
     xSemaphoreTake(ssh_mutex, portMAX_DELAY);
-    if (channel) {
-        libssh2_channel_write(channel, data, len);
+    // The channel is non-blocking: a full send window or a short write must be retried, or the
+    // rest of a paste / escape sequence is silently lost
+    while (channel && nwritten < len) {
+        ssize_t n = libssh2_channel_write(channel, data + nwritten, len - nwritten);
+        if (n == LIBSSH2_ERROR_EAGAIN) {
+            if (waitsocket(ssh_socket, session) <= 0 && ++waits >= SSH_KEY_MAX_WAITS) {
+                ESP_LOGE(TAG, "Key send timed out");
+                break;
+            }
+            continue;
+        }
+        if (n < 0) {
+            ESP_LOGE(TAG, "Failed to write to channel: %d", (int)n);
+            break;
+        }
+        nwritten += (size_t)n;
+        waits = 0;
     }
     xSemaphoreGive(ssh_mutex);
 }
