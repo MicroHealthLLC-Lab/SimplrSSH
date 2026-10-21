@@ -315,12 +315,22 @@ bool SSHTerminal::host_step_input(const std::string& raw_input, const std::strin
             forget_host.clear();
             if (yes) {
                 nvs_handle_t handle;
-                if (settings_nvs::open(NVS_NAMESPACE, NVS_READWRITE, &handle) == ESP_OK) {
-                    nvs_erase_key(handle, nvs_key_for(host_port).c_str());
-                    nvs_commit(handle);
+                esp_err_t err = settings_nvs::open(NVS_NAMESPACE, NVS_READWRITE, &handle);
+                if (err == ESP_OK) {
+                    err = nvs_erase_key(handle, nvs_key_for(host_port).c_str());
+                    if (err == ESP_ERR_NVS_NOT_FOUND) {
+                        err = ESP_OK;   // Already gone
+                    }
+                    if (err == ESP_OK) {
+                        err = nvs_commit(handle);
+                    }
                     nvs_close(handle);
                 }
-                append_text(("Forgot " + host_port + ". Its key will be shown on the next connect.\n").c_str());
+                if (err == ESP_OK) {
+                    append_text(("Forgot " + host_port + ". Its key will be shown on the next connect.\n").c_str());
+                } else {
+                    append_text(("WARNING: Could not forget " + host_port + "; its key is still trusted.\n").c_str());
+                }
             } else {
                 append_text("Kept.\n");
             }
