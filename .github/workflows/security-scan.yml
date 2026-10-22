@@ -18,10 +18,9 @@ name: Security scan
 # resolves @main the same way, so a local scan runs the same rules.
 #
 # Needs: vars.AWS_REGION_EAST_1, secrets.AWS_ROLE (OIDC; pulls MicroHealth's
-# FIPS images from ECR) and vars.ZAP_TARGET_URL (empty: ZAP is recorded as
-# not run, with the reason; the run does not fail). Reports stay run
-# artifacts. NOTHING IS UPLOADED TO S3: Tueri Core scans natively and no
-# longer ingests CI reports.
+# FIPS images from ECR) and vars.ZAP_TARGET_URL (empty: ZAP is recorded as not
+# run, with the reason; the run does not fail). NOTHING IS UPLOADED TO S3:
+# reports stay workflow artifacts, and Tueri Core scans the repository itself.
 on:
   push:
     # main is the default branch (every push to it is a release).
