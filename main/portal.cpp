@@ -1307,7 +1307,10 @@ void Cookies::store(const std::string& set_cookie, const Url& from)
         } else if (key == "secure") {
             c.secure = true;
         } else if (key == "max-age") {
-            remove = atol(value.c_str()) <= 0;
+            // RFC 6265: a value that isn't digits (or a minus sign and digits) is ignored
+            if (!value.empty() && (isdigit((unsigned char)value[0]) || (value[0] == '-' && value.size() > 1))) {
+                remove = atol(value.c_str()) <= 0;
+            }
         }
     }
     for (size_t i = 0; i < jar.size(); i++) {

@@ -484,6 +484,18 @@ TEST(portal_cookies_secure_path_replace_delete)
     CHECK_EQ(jar.size(), (size_t)0);
 }
 
+TEST(portal_cookie_invalid_max_age_is_ignored)
+{
+    Url u;
+    parse_url("http://p.example/", u);
+    Cookies jar;
+    jar.store("a=1; Max-Age=abc", u);
+    jar.store("b=1; Max-Age=", u);
+    CHECK_EQ(jar.header_for(u), std::string("a=1; b=1"));
+    jar.store("a=1; Max-Age=-5", u);
+    CHECK_EQ(jar.header_for(u), std::string("b=1"));
+}
+
 TEST(portal_cookie_path_matches_whole_segments)
 {
     Url set, admin, admin_x, admin_q, other;
