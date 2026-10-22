@@ -249,6 +249,11 @@ NOTICE: [1/3] espressif/button (4.2.1)
 NOTICE: [2/3] lvgl/lvgl (9.4.0)
 NOTICE: [3/3] idf (5.5.1)
 -- something else
+"""
+
+# ESP-IDF re-running the component manager: the second pass re-solves from the registry
+RECONFIGURE_LOG_RERUN = RECONFIGURE_LOG + """CMake Warning at /opt/esp/idf/tools/cmake/project.cmake:753 (message):
+  Missing kconfig option.  Re-run the build process...
 NOTICE: Processing 3 dependencies:
 NOTICE: [1/3] espressif/button (4.2.1) (/project/managed_components/espressif__button)
 NOTICE: [2/3] lvgl/lvgl (9.6.0~1)
@@ -258,22 +263,25 @@ NOTICE: [3/3] idf (5.5.1)
 
 class Dependencies(unittest.TestCase):
     def test_first_pass_only(self):
-        self.assertEqual(check_dependencies.first_install_pass(RECONFIGURE_LOG),
+        self.assertEqual(check_dependencies.first_install_pass(RECONFIGURE_LOG_RERUN),
                          {"espressif/button": "4.2.1", "lvgl/lvgl": "9.4.0"})
 
     def test_missing_pass(self):
         self.assertIsNone(check_dependencies.first_install_pass("nothing here"))
 
     def test_repository_lock_parses(self):
-        locked = check_dependencies.lock_versions(repo.read("dependencies.lock"))
-        self.assertIn("lvgl/lvgl", locked)
-        self.assertNotIn("idf", locked)
-        for name, (lock_v, _built) in check_dependencies.KNOWN_DRIFT.items():
-            with self.subTest(component=name):
-                self.assertEqual(locked.get(name), lock_v, "KNOWN_DRIFT must match dependencies.lock")
+        for board, (lock_name, _defaults) in check_dependencies.BOARDS.items():
+            with self.subTest(board=board):
+                locked = check_dependencies.lock_versions(repo.read(lock_name))
+                self.assertIn("lvgl/lvgl", locked)
+                self.assertNotIn("idf", locked)
+
+    def test_no_drift_allowance(self):
+        # A build compiles exactly the lock: nothing may excuse a difference
+        self.assertFalse(any("DRIFT" in name for name in vars(check_dependencies)))
 
     def run_check(self, compiled, lock_text, defaults="CONFIG_A=y\n", generated="CONFIG_A=y\n", board="tdeck",
-                  board_defaults=""):
+                  board_defaults="", log=RECONFIGURE_LOG, rewritten=None):
         with tempfile.TemporaryDirectory() as root:
             for name, version in compiled.items():
                 folder = os.path.join(root, "managed_components", name.replace("/", "__"))
@@ -281,25 +289,37 @@ class Dependencies(unittest.TestCase):
                 with open(os.path.join(folder, "idf_component.yml"), "w") as f:
                     f.write(f"version: '{version}'\n")
             files = {"lock": lock_text, "sdkconfig.defaults": defaults, "gen": generated, "committed": generated,
-                     "sdkconfig.defaults.esp32p4": board_defaults}
+                     "sdkconfig.defaults.esp32p4": board_defaults,
+                     check_dependencies.BOARDS[board][0]: lock_text if rewritten is None else rewritten}
             for name, text in files.items():
                 with open(os.path.join(root, name), "w") as f:
                     f.write(text)
             with redirect_stdout(io.StringIO()):
-                return check_dependencies.check(root, RECONFIGURE_LOG, os.path.join(root, "lock"),
+                return check_dependencies.check(root, log, os.path.join(root, "lock"),
                                                 os.path.join(root, "committed"), os.path.join(root, "gen"),
                                                 board)[0]
 
     LOCK = ("dependencies:\n  espressif/button:\n    version: 4.2.1\n  lvgl/lvgl:\n    version: 9.4.0\n"
             "  idf:\n    version: 5.5.1\ndirect_dependencies:\n- lvgl/lvgl\n")
+    BUILT = {"espressif/button": "4.2.1", "lvgl/lvgl": "9.4.0"}
 
     def test_matching_build_passes(self):
-        self.assertEqual(self.run_check({"espressif/button": "4.2.1", "lvgl/lvgl": "9.4.0"}, self.LOCK), [])
+        self.assertEqual(self.run_check(self.BUILT, self.LOCK), [])
+        self.assertEqual(self.run_check(self.BUILT, self.LOCK, board="tab5"), [])
 
-    def test_known_drift_passes_new_drift_fails(self):
-        self.assertEqual(self.run_check({"espressif/button": "4.2.1", "lvgl/lvgl": "9.6.0~1"}, self.LOCK), [])
-        problems = self.run_check({"espressif/button": "4.2.1", "lvgl/lvgl": "9.7.0"}, self.LOCK)
-        self.assertTrue(any("9.7.0" in p for p in problems))
+    def test_any_drift_fails(self):
+        problems = self.run_check({"espressif/button": "4.2.1", "lvgl/lvgl": "9.6.0~1"}, self.LOCK)
+        self.assertTrue(any("9.6.0~1" in p for p in problems))
+        problems = self.run_check({"espressif/button": "4.2.1", "lvgl/lvgl": "9.6.0~1"}, self.LOCK, board="tab5")
+        self.assertTrue(any("dependencies.lock.esp32p4 pins 9.4.0" in p for p in problems))
+
+    def test_component_manager_rerun_fails(self):
+        problems = self.run_check(self.BUILT, self.LOCK, log=RECONFIGURE_LOG_RERUN)
+        self.assertTrue(any("ran twice" in p for p in problems))
+
+    def test_rewritten_lock_fails(self):
+        problems = self.run_check(self.BUILT, self.LOCK, rewritten=self.LOCK.replace("- lvgl/lvgl", "- idf"))
+        self.assertTrue(any("rewrote dependencies.lock" in p for p in problems))
 
     def test_install_must_match_lock(self):
         lock = self.LOCK.replace("version: 4.2.1", "version: 4.3.0")
@@ -307,16 +327,14 @@ class Dependencies(unittest.TestCase):
         self.assertTrue(any("installed 4.2.1" in p for p in problems))
 
     def test_tab5_defaults_override_shared_ones(self):
-        compiled = {"espressif/button": "4.2.1", "lvgl/lvgl": "9.6.0~1"}   # Known drift on the Tab5 too
-        self.assertEqual(self.run_check(compiled, self.LOCK, defaults="CONFIG_A=n\n", generated="CONFIG_A=y\n",
+        self.assertEqual(self.run_check(self.BUILT, self.LOCK, defaults="CONFIG_A=n\n", generated="CONFIG_A=y\n",
                                         board="tab5", board_defaults="CONFIG_A=y\n"), [])
-        problems = self.run_check(compiled, self.LOCK, defaults="CONFIG_A=y\n", generated="CONFIG_A=y\n",
+        problems = self.run_check(self.BUILT, self.LOCK, defaults="CONFIG_A=y\n", generated="CONFIG_A=y\n",
                                   board="tab5", board_defaults="CONFIG_A=n\n")
         self.assertTrue(any("CONFIG_A" in p for p in problems))
 
     def test_sdkconfig_default_must_take_effect(self):
-        problems = self.run_check({"espressif/button": "4.2.1", "lvgl/lvgl": "9.4.0"}, self.LOCK,
-                                  defaults="CONFIG_A=n\n", generated="CONFIG_A=y\n")
+        problems = self.run_check(self.BUILT, self.LOCK, defaults="CONFIG_A=n\n", generated="CONFIG_A=y\n")
         self.assertTrue(any("CONFIG_A" in p for p in problems))
 
 

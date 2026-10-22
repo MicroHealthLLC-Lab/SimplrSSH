@@ -204,9 +204,13 @@ only while no SSH session is open; in a session they go to the server.
   `SimplrSSH-Tab5-v<ver>-release.bin` (launcher: `build-tab5/SimplrSSH-Tab5-v<ver>-launcher.bin`).
   Tab5 settings: `sdkconfig.defaults` then `sdkconfig.defaults.esp32p4`, committed result
   `sdkconfig.tab5`. Both boards share `partitions.csv` / `partitions_launcher.csv`.
-- After changing `main/idf_component.yml`, refresh both lock files. The component manager
-  re-solves after installing (see `check_dependencies.py`, KNOWN_DRIFT), so keep the locked
-  versions: only the solver's first pass belongs in a lock file.
+- Builds compile exactly the lock files; nothing published upstream changes a build. After
+  changing `main/idf_component.yml`, regenerate both lock files (and `sdkconfig` /
+  `sdkconfig.tab5`) with `idf.py reconfigure` in a clean copy (no build dir, no
+  `managed_components/`) and commit them. Keep the `sdkconfig.json` seed in `CMakeLists.txt`:
+  without it a clean build re-runs the component manager, which re-solves from the registry
+  and takes the newest releases. The install job fails on any difference
+  (`check_dependencies.py`); never add an allowance for one.
 - Match the surrounding style (4-space indent, `snake_case`, brace on its own line for
   functions, same line for control flow).
 - CI must build, and the **Tests** workflow (`.github/workflows/tests.yml`) must pass: it runs

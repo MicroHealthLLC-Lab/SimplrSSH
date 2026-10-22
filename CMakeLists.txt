@@ -22,6 +22,35 @@ if(IDF_TARGET STREQUAL "esp32p4")
     idf_build_set_property(DEPENDENCIES_LOCK "${CMAKE_CURRENT_LIST_DIR}/dependencies.lock.esp32p4")
 endif()
 
+# Builds compile exactly the lock file's components. A clean build directory has no
+# config/sdkconfig.json yet, so the component manager can't evaluate the $CONFIG{...} rules in
+# LVGL's manifest; ESP-IDF then re-runs it ("Missing kconfig option"), and the re-run re-solves
+# the installed components' dependencies from the registry, replacing locked versions with the
+# newest releases. Seeding the file from the board's sdkconfig (the yes/no and number options
+# those rules read) avoids the re-run; the configure step overwrites it with the full file.
+if(DEFINED SDKCONFIG)
+    get_filename_component(seed_sdkconfig "${SDKCONFIG}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_LIST_DIR}")
+else()
+    set(seed_sdkconfig "${CMAKE_CURRENT_LIST_DIR}/sdkconfig")
+endif()
+set(seed_json "${CMAKE_BINARY_DIR}/config/sdkconfig.json")
+if(NOT EXISTS "${seed_json}" AND EXISTS "${seed_sdkconfig}")
+    file(STRINGS "${seed_sdkconfig}" seed_lines
+         REGEX "^(CONFIG_[A-Z0-9_]+=(y|-?(0|[1-9][0-9]*))|# CONFIG_[A-Z0-9_]+ is not set)$")
+    set(seed_entries "")
+    foreach(line IN LISTS seed_lines)
+        if(line MATCHES "^CONFIG_([A-Z0-9_]+)=y$")
+            list(APPEND seed_entries "\"${CMAKE_MATCH_1}\": true")
+        elseif(line MATCHES "^CONFIG_([A-Z0-9_]+)=(.+)$")
+            list(APPEND seed_entries "\"${CMAKE_MATCH_1}\": ${CMAKE_MATCH_2}")
+        elseif(line MATCHES "^# CONFIG_([A-Z0-9_]+) is not set$")
+            list(APPEND seed_entries "\"${CMAKE_MATCH_1}\": false")
+        endif()
+    endforeach()
+    list(JOIN seed_entries ",\n" seed_body)
+    file(WRITE "${seed_json}" "{\n${seed_body}\n}\n")
+endif()
+
 project(SimplrSSH)
 
 # Image for launchers such as bmorcelli/Launcher, which install apps into their own partition

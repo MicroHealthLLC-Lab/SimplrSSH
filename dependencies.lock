@@ -10,7 +10,7 @@ dependencies:
       require: private
       version: '>=4.0'
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     version: 4.2.1
   espressif/cmake_utilities:
@@ -224,26 +224,51 @@ dependencies:
       type: service
     version: 2.0.2
   espressif/led_strip:
-    component_hash: 28621486f77229aaf81c71f5e15d6fbf36c2949cf11094e07090593e659e7639
+    component_hash: 027f68f2b57b0dca1d68dff6cc1139d9093825aa808c2bc3ca42bb2ce530fce9
     dependencies:
     - name: idf
       require: private
-      version: '>=5.0'
+      version: '>=5.2'
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
-    version: 3.0.3
+    version: 3.1.1
   idf:
     source:
       type: idf
     version: 5.5.1
   lvgl/lvgl:
-    component_hash: 17e68bfd21f0edf4c3ee838e2273da840bf3930e5dbc3bfa6c1190c3aed41f9f
-    dependencies: []
+    component_hash: 7d82410747bbfb319531449749e940f440f8414f041f9eaba13f0d1dd7f58cdd
+    dependencies:
+    - name: espressif/freetype
+      registry_url: https://components.espressif.com
+      require: private
+      rules:
+      - if: idf_version >=5.5 && $CONFIG{LV_USE_FREETYPE} == True
+      version: ^2.14.3
+    - name: espressif/libjpeg-turbo
+      registry_url: https://components.espressif.com
+      require: private
+      rules:
+      - if: idf_version >=5.5 && $CONFIG{LV_USE_LIBJPEG_TURBO} == True
+      version: ^3.1.1
+    - name: espressif/libpng
+      registry_url: https://components.espressif.com
+      require: private
+      rules:
+      - if: idf_version >=5.5 && $CONFIG{LV_USE_LIBPNG} == True
+      version: ^1.6.58
+    - name: espressif/lz4
+      registry_url: https://components.espressif.com
+      require: private
+      rules:
+      - if: idf_version >=5.5 && $CONFIG{LV_USE_LZ4} == True && $CONFIG{LV_USE_LZ4_INTERNAL}
+          == False
+      version: ^1.10.0
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 9.4.0
+    version: 9.6.0~1
   skuodi/libssh2_esp:
     component_hash: d3a77203c7a8978869ffc43a148f687c6165ec27b1c01caae0ccceaaa281fcca
     dependencies: []
@@ -260,6 +285,6 @@ direct_dependencies:
 - idf
 - lvgl/lvgl
 - skuodi/libssh2_esp
-manifest_hash: 4c12f1e680ea1d2d5d6964847871992f24f6c740017658748d1aa2dc5cefa0cf
+manifest_hash: 4e440f8f13ba6180dd9dc261789d25eb99c09e18eca816ed921aa5fd72a82d69
 target: esp32s3
 version: 2.0.0

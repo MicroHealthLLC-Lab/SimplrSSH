@@ -82,7 +82,7 @@ env:
 jobs:
   # a) install: resolve components on a clean checkout the way the build does, and check
   #    the result against dependencies.lock and sdkconfig.defaults
-  #    (.github/scripts/check_dependencies.py, including the known re-solve drift).
+  #    (.github/scripts/check_dependencies.py: the build compiles exactly the lock).
   install:
     name: install
     runs-on: ubuntu-latest
