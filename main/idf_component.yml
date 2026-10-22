@@ -48,3 +48,7 @@ dependencies:
     version: '1.6.5'   # esp_wifi_* API on the ESP32-P4, backed by esp_hosted
     rules:
       - if: 'target == esp32p4'
+  espressif/esp_sccb_intf:
+    version: '0.0.9'   # Not used directly: the BSP's esp_cam_sensor needs it ('>=0.0.5'); pinned
+    rules:             # like led_strip (the install took 1.0.0, a new major release)
+      - if: 'target == esp32p4'

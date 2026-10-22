@@ -475,6 +475,7 @@ dependencies:
 direct_dependencies:
 - espressif/esp_hosted
 - espressif/esp_lvgl_port
+- espressif/esp_sccb_intf
 - espressif/esp_wifi_remote
 - espressif/m5stack_tab5
 - idf

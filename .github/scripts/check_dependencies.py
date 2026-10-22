@@ -34,10 +34,11 @@ import sys
 KNOWN_DRIFT = {
     "lvgl/lvgl": ("9.4.0", "9.6.0~1"),
     "espressif/cmake_utilities": ("0.5.3", "1.1.1"),
-    "espressif/led_strip": ("3.0.3", "3.1.0~1"),   # Pinned in main/idf_component.yml; unused
+    "espressif/led_strip": ("3.0.3", "3.1.1"),     # Pinned in main/idf_component.yml; unused
 }
 KNOWN_DRIFT_TAB5 = {
     "lvgl/lvgl": ("9.4.0", "9.6.0~1"),
+    "espressif/esp_sccb_intf": ("0.0.9", "1.0.0"),   # Pinned in main/idf_component.yml; unused
 }
 BOARDS = {
     "tdeck": (KNOWN_DRIFT, ["sdkconfig.defaults"]),
