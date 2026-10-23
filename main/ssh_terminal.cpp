@@ -965,15 +965,7 @@ void SSHTerminal::execute_command(const std::string& cmd)
         vault::wipe(arg);
     }
     else if (cmd.rfind("ssh ", 0) == 0) {
-        std::vector<std::string> parts;
-        size_t pos = 0;
-        std::string temp = cmd;
-        
-        while ((pos = temp.find(' ')) != std::string::npos) {
-            parts.push_back(temp.substr(0, pos));
-            temp.erase(0, pos + 1);
-        }
-        parts.push_back(temp);
+        std::vector<std::string> parts = split_command_args(cmd);
         
         if (parts.size() >= 5) {
             std::string host = parts[1];
@@ -989,18 +981,9 @@ void SSHTerminal::execute_command(const std::string& cmd)
         for (auto& part : parts) {
             vault::wipe(part);
         }
-        vault::wipe(temp);
     }
     else if (cmd.rfind("sshkey ", 0) == 0) {
-        std::vector<std::string> parts;
-        size_t pos = 0;
-        std::string temp = cmd;
-        
-        while ((pos = temp.find(' ')) != std::string::npos) {
-            parts.push_back(temp.substr(0, pos));
-            temp.erase(0, pos + 1);
-        }
-        parts.push_back(temp);
+        std::vector<std::string> parts = split_command_args(cmd);
         
         if (parts.size() >= 5) {
             std::string host = parts[1];
@@ -1039,7 +1022,6 @@ void SSHTerminal::execute_command(const std::string& cmd)
         for (auto& part : parts) {
             vault::wipe(part);
         }
-        vault::wipe(temp);
     }
     else if (cmd == "profile" || cmd == "profiles" ||
              cmd.rfind("profile ", 0) == 0 || cmd.rfind("profiles ", 0) == 0) {
@@ -1073,7 +1055,7 @@ void SSHTerminal::execute_command(const std::string& cmd)
         append_text("  connect - Scan and pick a WiFi network\n");
         append_text("  connect <SSID> <PASSWORD> - Connect to WiFi\n");
         append_text("    Use quotes for spaces: connect \"My WiFi\" password\n");
-        append_text("  ssh <HOST> <PORT> <USER> <PASS> - Connect via SSH\n");
+        append_text("  ssh <HOST> <PORT> <USER> <PASS> - Connect via SSH (quote a password with spaces)\n");
         append_text("  sshkey <HOST> <PORT> <USER> <KEYFILE> [PASSPHRASE] - SSH with key\n");
         append_text("    Note: Place .pem keys in /sdcard/ssh_keys/ before use\n");
         append_text("  profile - Saved connection profiles menu\n");
