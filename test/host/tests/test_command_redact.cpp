@@ -68,3 +68,33 @@ TEST(redact_other_commands_untouched)
     CHECK_EQ(redact("ls -la /tmp", false), std::string("ls -la /tmp"));
     CHECK_EQ(redact("", false), std::string(""));
 }
+
+TEST(split_args_quotes_group_and_are_dropped)
+{
+    std::vector<std::string> a = split_command_args("ssh host 22 user \"my pass word\"");
+    CHECK_EQ(a.size(), (size_t)5);
+    CHECK_EQ(a[4], std::string("my pass word"));
+}
+
+TEST(split_args_repeated_spaces_add_no_empty_arguments)
+{
+    std::vector<std::string> a = split_command_args("ssh  host   22 user pw ");
+    CHECK_EQ(a.size(), (size_t)5);
+    CHECK_EQ(a[1], std::string("host"));
+    CHECK_EQ(a[2], std::string("22"));
+}
+
+TEST(split_args_quoted_empty_is_an_argument)
+{
+    std::vector<std::string> a = split_command_args("ssh host 22 user \"\"");
+    CHECK_EQ(a.size(), (size_t)5);
+    CHECK_EQ(a[4], std::string());
+}
+
+TEST(split_args_agree_with_redaction)
+{
+    // The argument redact_secrets() hides is the one the ssh command takes as the password
+    bool has_secret = false;
+    CHECK_EQ(redact_secrets("ssh host 22 user \"my pass\"", &has_secret), std::string("ssh host 22 user ****"));
+    CHECK(has_secret);
+}

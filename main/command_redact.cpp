@@ -42,3 +42,31 @@ std::string redact_secrets(const std::string& cmd, bool* has_secret)
     }
     return cmd;
 }
+
+std::vector<std::string> split_command_args(const std::string& cmd)
+{
+    std::vector<std::string> args;
+    std::string arg;
+    bool in_token = false;
+    bool in_quotes = false;
+    for (char c : cmd) {
+        if (c == ' ' && !in_quotes) {
+            if (in_token) {
+                args.push_back(arg);
+                arg.clear();
+                in_token = false;
+            }
+            continue;
+        }
+        in_token = true;
+        if (c == '"') {
+            in_quotes = !in_quotes;
+        } else {
+            arg += c;
+        }
+    }
+    if (in_token) {
+        args.push_back(arg);
+    }
+    return args;
+}
