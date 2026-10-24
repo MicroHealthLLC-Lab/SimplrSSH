@@ -25,6 +25,8 @@ a menu of short prompts; ChatGPT as message bubbles; the console (text log) for 
 Dark theme with 7:1 text contrast (`theme::` colors, checked by the `Contrast` guard; text never sits on `ACCENT`, use `ACCENT_BG`), symbol-font icons, no images or animations. SSH sessions: on the T-Deck, scrolling
 text and a line sent with Enter; on the Tab5, a full-screen xterm (TUI programs) with every key
 sent to the server. Keep the T-Deck's terminal as it is.
+In an SSH session, holding the talk key (Tab5: Ctrl on its own; T-Deck: the trackball) records
+speech that ChatGPT's speech-to-text model types at the cursor, without Enter.
 Local commands that are also shell commands (`sleep`, `shutdown`, `poweroff`, `power`) are taken
 only while no SSH session is open; in a session they go to the server.
 
@@ -35,7 +37,8 @@ only while no SSH session is open; in a session they go to the server.
 - No telemetry, analytics, OTA, web servers, access-point mode, Bluetooth, or background
   network traffic. The only outbound connections allowed are: the WiFi network the user
   picks, DNS for the host the user typed, that SSH server, api.openai.com - only while
-  the user is using ChatGPT, with their own API key, over verified TLS (CA bundle) - and the
+  the user is using ChatGPT (or holds the talk key in an SSH session to type by voice), with
+  their own API key, over verified TLS (CA bundle) - and the
   WiFi network's sign-in page (captive portal) - only while the user runs `portal` (WiFi
   menu: Sign in): one plain-HTTP probe to `connectivitycheck.gstatic.com/generate_204` (the
   network answers it with its page; 204 means online; if that name doesn't resolve, the

@@ -787,7 +787,8 @@ void SSHTerminal::sync_view()
 
     view.set_title(mode == ViewMode::Page ? page.title
                  : mode == ViewMode::Chat ? std::string("ChatGPT")
-                 : ssh_connected ? std::string("SSH") : std::string("Console"));
+                 : ssh_connected ? (dictate_status.empty() ? std::string("SSH") : "SSH: " + dictate_status)
+                 : std::string("Console"));
 }
 
 // Trackball up/down, arrow keys: the next or previous row. Up from the first row (and on a
@@ -1048,7 +1049,7 @@ void SSHTerminal::execute_command(const std::string& cmd)
     else if (cmd == "help") {
         append_text("Available commands:\n");
         append_text("  menu - Home menu (also 'exit' when not connected)\n");
-        append_text((std::string("  chat - ChatGPT (") + board::HINT_TALK + " to talk)\n").c_str());
+        append_text((std::string("  chat - ChatGPT (") + board::HINT_TALK + " to talk; in SSH, to type by voice)\n").c_str());
         append_text("  wifi - WiFi menu: scan, pick a network, save it\n");
         append_text("  wifi scan|saved|list|forget|off\n");
         append_text("  portal - Sign in to the network's web page (cafe, hotel)\n");

@@ -63,8 +63,11 @@ public:
     void run_startup_tasks();
     // Called regularly from the input task: WiFi reconnect, return to menu after SSH ends
     void background_tick();
-    // Trackball held down (start) / released (long_press: held >= 1 s)
+    // Trackball (Tab5: Ctrl) held down (start) / released (long_press: held >= 1 s): push-to-talk
+    // in ChatGPT and, in an SSH session, dictation typed at the cursor
     void on_trackball_hold(bool start, bool long_press);
+    // The talk key was used with another key (Tab5: Ctrl+C): the recording is dropped
+    void cancel_talk();
     // A page row or the title bar's back arrow was tapped (INPUT_ACTIVATE): answers with it
     void activate_touched();
     // Shows the home menu (startup, 'menu', 'exit')
@@ -226,6 +229,7 @@ private:
     bool chat_active = false;
     bool chat_open_after_key = false;
     bool chat_job_voice = false;
+    bool chat_job_dictate = false;          // The worker transcribes for the SSH session (dictate_job)
     volatile bool chat_busy = false;
     volatile bool chat_recording = false;
     volatile bool chat_cancel = false;      // Esc: the worker stops recording, answering or speaking
@@ -234,6 +238,16 @@ private:
     bool chat_models_for_menu = false;
     volatile bool chat_models_busy = false;
     std::string input_banner;          // Shown instead of the input line (e.g. recording)
+
+    // Dictation in an SSH session (chat_app.cpp): hold the talk key, speak, let go; the words
+    // are typed at the cursor (Enter is not sent). Uses ChatGPT's key and speech-to-text model.
+    bool hold_for_dictation = false;        // The talk key's hold is for dictation
+    std::string dictate_problem;            // Why it couldn't start: shown when the key is let go
+    uint32_t dictate_ssh_generation = 0;    // Session the words are for (ssh_generation)
+    bool dictate_ready = false;             // dictate_text waits for keypad_task (display lock)
+    std::string dictate_text;
+    std::string dictate_status;             // In the title bar: progress, or a message
+    int64_t dictate_status_until_ms = 0;    // A message's end (0: progress, cleared by the worker)
     int pty_cols = 80;                 // Terminal size reported to SSH servers
     int pty_rows = 24;
     bool wifi_quiet_connect = false;   // Background reconnect: no progress dots
@@ -416,6 +430,16 @@ private:
     void chat_submit(const std::string& text);
     void chat_start_job(bool voice);
     void chat_job();
+    typedef std::function<void(const std::string&)> Say;
+    bool chat_record(int16_t*& pcm, size_t& samples, const char* release_hint, const Say& banner, const Say& info);
+    std::string chat_transcribe(const std::string& key, const std::string& stt_model, int16_t* pcm, size_t samples,
+                                const Say& banner, const Say& info);
+    bool chat_job_models(const std::string& key, uint32_t generation, std::string& model, std::string& stt_model,
+                         std::string& tts_model);
+    void dictate_start();
+    void dictate_job();
+    void dictate_show(const std::string& text, bool brief);
+    void dictate_tick();
     lv_obj_t* chat_add_bubble(int kind, const std::string& text);
     lv_obj_t* chat_ui_bubble(uint32_t generation, int kind, const std::string& text);
     void chat_ui_update(uint32_t generation, lv_obj_t* label, const std::string& text);

@@ -3,7 +3,8 @@
 SimplrSSH is a handheld SSH client for the LilyGO T-Deck (ESP32-S3) and the M5Stack Tab5
 (ESP32-P4, WiFi through an ESP32-C6 co-processor), built from one source tree. Its job is to join a
 WiFi network the user picks, open SSH sessions to servers the user enters, talk to
-api.openai.com only when the user opens ChatGPT with their own API key, and load the WiFi
+api.openai.com only when the user opens ChatGPT or dictates in an SSH session (holding the talk
+key), with their own API key, and load the WiFi
 network's sign-in page (captive portal) only when the user runs `portal`. It should talk to
 nothing else.
 
@@ -20,7 +21,7 @@ vulnerability") rather than a public issue.
 | SSH session | Network attacker impersonating the server (MITM) | Host key fingerprints, trust on first use, changed keys refused |
 | Secrets in use | Shoulder surfing, serial logs, command history | Masked input and echo, no secret logging, secrets kept out of history, buffers wiped after use |
 | OpenAI API key | Leaking through backups, logs or plain text | Stored in the vault like other passwords (PIN-protected if set); sent only to api.openai.com over TLS verified with the ESP-IDF CA bundle |
-| Chat content and voice | Unexpected destinations | Sent only to OpenAI, only while the user is in ChatGPT; the chat stays in RAM (not saved); recordings are freed after transcription |
+| Chat content and voice | Unexpected destinations | Sent only to OpenAI, only while the user is in ChatGPT or holds the talk key in an SSH session; the chat stays in RAM (not saved); recordings are freed after transcription |
 | Typed sign-in details (name, email, room or voucher code) and portal cookies | Being kept or sent elsewhere | Sent only to the form's own address, chosen by the page the user is on; kept in RAM only and wiped when the sign-in ends; never logged or saved. Password fields are masked; on a page without HTTPS the user is warned before typing one |
 | Device | Unexpected network exposure | Station-only WiFi (no access point / DHCP server), IPv4 only, no listening sockets, no telemetry/OTA/cloud |
 
@@ -234,6 +235,16 @@ hotspot for those. Hardware behaviour has not been confirmed on a T-Deck or Tab5
 | WiFi network names from a scan are shown in the menus | SSIDs come from the air (any bytes): the WiFi menus show them as printable ASCII, like sign-in pages |
 | LVGL allocates its objects in PSRAM (`main/lv_mem_psram.c`) | Keeps internal RAM for WiFi, TLS and SSH; pages are freed when left |
 | Answers and messages | Menu answers are no longer echoed into the text log; a page's notice shows only messages printed since the last answer (never SSH output), bounded to 1 KB. The back arrow on a prompt wipes a half-typed answer. The side panel's Menu button now posts an event instead of disconnecting SSH inside LVGL's task |
+
+Hardware behaviour has not been confirmed on a T-Deck or Tab5 yet.
+
+### Voice typing in SSH sessions (2026-10-23)
+
+| Change | Security review |
+|---|---|
+| In an SSH session, holding the talk key (Tab5: Ctrl on its own; T-Deck: the trackball) records speech; on release it goes to OpenAI's speech-to-text model with the ChatGPT key, and the words are typed at the cursor (Tab5: sent to the server as keys; T-Deck: into the input line) | Network use only while the user holds the key, to api.openai.com over verified TLS, same client and key as ChatGPT; no new task (the ChatGPT worker, created per recording). The transcript is untrusted: reduced to printable ASCII on one line (`portal::printable`, at most 1000 characters), so no Enter, control codes or escape sequences reach the server, and nothing is run until the user presses Enter. It goes only to the session it was spoken in (`ssh_generation`) and is dropped if that session ended. Nothing is logged, saved or added to command history; recording and transcript buffers are freed / wiped after use |
+| Ctrl pressed with another key while a recording has started (a slow Ctrl+C) | The keymap sends `INPUT_HOLD_CANCEL` before the key: the recording is dropped, never uploaded or typed (also in ChatGPT, where it used to be sent) |
+| Push-to-talk press and release wait up to 1 s for the display lock instead of being dropped | A lost release can no longer leave the microphone recording for 30 s |
 
 Hardware behaviour has not been confirmed on a T-Deck or Tab5 yet.
 

@@ -13,7 +13,8 @@
  *   Ctrl+letter           control code (Ctrl+C = 3 ...), also Ctrl+[ \ ] ^ _ /
  *   Alt+key               the key with Meta (KEY_ALT), for programs over SSH
  *   Sym+1 ... Sym+0, -, + F1 ... F10, F11, F12
- *   Ctrl (hold alone)     push-to-talk in ChatGPT; held 1 s elsewhere: delete history entry
+ *   Ctrl (hold alone)     push-to-talk: ChatGPT, or dictation in an SSH session; held 1 s
+ *                         elsewhere: delete history entry. Another key while held cancels it
  */
 
 #ifndef TAB5_KEYMAP_HPP
@@ -58,8 +59,7 @@ private:
     uint32_t repeat_value = 0;
     uint32_t repeat_next_ms = 0;
 
-    bool talk_down = false;        // Ctrl held, no other key pressed before HOLD_MS
-    bool talk_used = false;        // Another key pressed while talking
+    bool talk_down = false;        // Ctrl held on its own
     bool talk_holding = false;     // HOLD_START sent
     uint32_t talk_pressed_ms = 0;
 

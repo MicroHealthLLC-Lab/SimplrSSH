@@ -201,6 +201,27 @@ BOARD_CONFIGS = {
 }
 
 
+class Dictation(unittest.TestCase):
+    # AI_RULES.md: in an SSH session the talk key types speech at the cursor, without Enter
+    @staticmethod
+    def body(name):
+        return SRC["main/chat_app.cpp"].split(f"SSHTerminal::{name}(", 1)[1].split("\n}", 1)[0]
+
+    def test_transcript_is_one_printable_line(self):
+        # Untrusted text from the network: printable ASCII, bounded, no Enter or control codes
+        self.assertIn("portal::printable(heard, MAX_DICTATION)", self.body("dictate_job"))
+
+    def test_typed_only_into_the_session_it_was_spoken_in(self):
+        tick = self.body("dictate_tick")
+        self.assertIn("ssh_generation == dictate_ssh_generation", tick)
+        self.assertNotIn("\\r", tick)
+        self.assertNotIn("\\n", tick)
+
+    def test_slow_ctrl_key_drops_the_recording(self):
+        self.assertIn("INPUT_HOLD_CANCEL", SRC["main/tab5_keymap.cpp"])
+        self.assertIn("cancel_talk()", SRC["main/deck_base.cpp"])
+
+
 class SdkconfigDefaults(unittest.TestCase):
     def test_every_setting_explained(self):
         for name in ("sdkconfig.defaults", "sdkconfig.defaults.esp32p4"):

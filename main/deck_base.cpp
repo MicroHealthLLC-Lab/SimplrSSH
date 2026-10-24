@@ -38,6 +38,25 @@ void board::post_input(InputEvent event)
     }
 }
 
+// Single deliberate presses (a tap, the Menu button) and push-to-talk: wait briefly for a redraw
+// to finish rather than drop them. A lost release would leave the microphone recording.
+// Trackball steps are dropped when the display is busy (more follow).
+static uint32_t input_lock_wait_ms(uint8_t event)
+{
+    switch (event) {
+        case board::INPUT_ACTIVATE:
+        case board::INPUT_GO_HOME:
+            return 200;
+        case board::INPUT_HOLD_START:
+        case board::INPUT_HOLD_END:
+        case board::INPUT_HOLD_END_LONG:
+        case board::INPUT_HOLD_CANCEL:
+            return 1000;
+        default:
+            return 0;
+    }
+}
+
 static void handle_input_event(uint8_t event)
 {
     switch (event) {
@@ -46,9 +65,10 @@ static void handle_input_event(uint8_t event)
         case board::INPUT_LEFT:   ssh_terminal->navigate_history(1); break;   // Older command / previous choice
         case board::INPUT_RIGHT:  ssh_terminal->navigate_history(-1); break;  // Newer command / next choice
         case board::INPUT_ENTER:  ssh_terminal->handle_key_input('\n'); break;
-        case board::INPUT_HOLD_START:    ssh_terminal->on_trackball_hold(true, false); break;   // Push-to-talk in chat
+        case board::INPUT_HOLD_START:    ssh_terminal->on_trackball_hold(true, false); break;   // Push-to-talk: chat, SSH
         case board::INPUT_HOLD_END:      ssh_terminal->on_trackball_hold(false, false); break;
         case board::INPUT_HOLD_END_LONG: ssh_terminal->on_trackball_hold(false, true); break;   // Else: delete history entry
+        case board::INPUT_HOLD_CANCEL:   ssh_terminal->cancel_talk(); break;
         case board::INPUT_CURSOR_LEFT:   ssh_terminal->move_cursor_left(); break;
         case board::INPUT_CURSOR_RIGHT:  ssh_terminal->move_cursor_right(); break;
         case board::INPUT_CURSOR_HOME:   ssh_terminal->move_cursor_home(); break;
@@ -203,7 +223,7 @@ static void keypad_task(void *param)
             if (!key) {
                 break;
             }
-            if (!bsp_display_lock(0)) {
+            if (!bsp_display_lock((key & board::KEY_EVENT) ? input_lock_wait_ms((uint8_t)key) : 0)) {
                 continue;
             }
             if (key & board::KEY_EVENT) {
@@ -218,10 +238,7 @@ static void keypad_task(void *param)
 
         uint8_t event;
         while (xQueueReceive(input_events, &event, 0) == pdTRUE) {
-            // A tap or the Menu button is a single deliberate press: wait briefly for a redraw
-            // to finish rather than drop it (trackball steps are dropped, more follow)
-            bool deliberate = event == board::INPUT_ACTIVATE || event == board::INPUT_GO_HOME;
-            if (!bsp_display_lock(deliberate ? 200 : 0)) {
+            if (!bsp_display_lock(input_lock_wait_ms(event))) {
                 continue;
             }
             handle_input_event(event);

@@ -124,6 +124,12 @@ OpenAI, and only while you use ChatGPT.
   sent as your message to the chat model you picked. If the microphone picks up nothing, the
   device says so and doesn't upload the recording. Press **Esc** (T-Deck: swipe left, then Esc)
   to stop a recording, a reply being written, or a reply being read aloud.
+- **Type by voice in SSH**: once ChatGPT has your API key, hold **Ctrl** on its own (T-Deck:
+  hold the trackball) in an SSH session, speak, and let go. The title bar shows `Recording`,
+  then `Transcribing...`, and your words appear at the cursor, as if typed. Enter is not
+  pressed for you: read the line, fix it if needed, then press Enter. Pressing another key while
+  holding Ctrl (Ctrl+C ...) drops the recording. Problems (no key, too short, nothing heard)
+  show in the title bar for a few seconds.
 - **Sign-in pages (captive portals)**: in a cafe or hotel, the WiFi may connect but let
   nothing through until you accept its terms on a web page. Choose **1 WiFi** → **5 Sign in**
   (or type `portal`). SimplrSSH loads that page and shows it as a form: its text on top, then a
@@ -171,7 +177,7 @@ Sym+Up / Sym+Down are Page Up / Page Down.
 | Aa | Hold for capitals; tap for one capital; tap twice for caps lock |
 | Sym + key | The key's second symbol (`?` `/` `<` `>` `{` `}` `\|` `~` `:` `"` `=` `,`) |
 | Ctrl + letter | Control code to the server (Ctrl+C, Ctrl+D, Ctrl+Z, Ctrl+L ...) |
-| Ctrl (hold on its own) | Talk to ChatGPT while held; held for a second elsewhere, deletes the shown history entry |
+| Ctrl (hold on its own) | Talk to ChatGPT while held; in an SSH session, type by voice at the cursor; held for a second elsewhere, deletes the shown history entry |
 
 In an SSH session the keys go to the server:
 
