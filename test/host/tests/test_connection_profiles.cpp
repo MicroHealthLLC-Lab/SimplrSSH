@@ -153,6 +153,24 @@ TEST(networks_round_trip)
     }
 }
 
+TEST(network_ssid_holding_the_field_separator_round_trips)
+{
+    factory_device();
+    SavedNetwork odd;
+    odd.ssid = std::string("Cafe") + '\x1F' + "Guest" + '\x1F' + "1";
+    odd.secret_saved = true;
+    odd.hidden = true;
+    CHECK_EQ(network_store::save({odd}), ESP_OK);
+
+    auto loaded = network_store::load();
+    CHECK_EQ(loaded.size(), (size_t)1);
+    if (loaded.size() == 1) {
+        CHECK_EQ(loaded[0].ssid, odd.ssid);
+        CHECK(loaded[0].secret_saved);
+        CHECK(loaded[0].hidden);
+    }
+}
+
 TEST(networks_bounded_to_max_count)
 {
     factory_device();
