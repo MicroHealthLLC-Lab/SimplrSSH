@@ -676,9 +676,20 @@ void SSHTerminal::chat_job()
     const uint32_t gen = chat_generation;
     const Say info = [this, gen](const std::string& text) { chat_ui_bubble(gen, BUBBLE_INFO, text); };
     const Say banner = [this](const std::string& text) { chat_ui_banner(text); };
+    // A typed question that never reaches OpenAI leaves the history, so the next one is not
+    // sent after an unanswered message (the failed-reply path below does the same)
+    const auto drop_unanswered = [this]() {
+        if (!chat_job_voice && bsp_display_lock(1000)) {
+            if (!chat_history.empty() && chat_history.back().from_user) {
+                chat_history.pop_back();
+            }
+            bsp_display_unlock();
+        }
+    };
     std::string key, error;
     if (vault::get(KEY_ID, key) != ESP_OK) {
         chat_recording = false;
+        drop_unanswered();
         info("Can't read the API key - set it in 'settings'.");
         return;
     }
@@ -697,6 +708,7 @@ void SSHTerminal::chat_job()
     if (!chat_job_models(key, gen, model, stt_model, tts_model)) {
         heap_caps_free(pcm);
         vault::wipe(key);
+        drop_unanswered();
         return;
     }
 
