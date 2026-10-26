@@ -787,7 +787,8 @@ void SSHTerminal::sync_view()
 
     view.set_title(mode == ViewMode::Page ? page.title
                  : mode == ViewMode::Chat ? std::string("ChatGPT")
-                 : ssh_connected ? std::string("SSH") : std::string("Console"));
+                 : ssh_connected ? (dictate_status.empty() ? std::string("SSH") : "SSH: " + dictate_status)
+                 : std::string("Console"));
 }
 
 // Trackball up/down, arrow keys: the next or previous row. Up from the first row (and on a
@@ -965,15 +966,7 @@ void SSHTerminal::execute_command(const std::string& cmd)
         vault::wipe(arg);
     }
     else if (cmd.rfind("ssh ", 0) == 0) {
-        std::vector<std::string> parts;
-        size_t pos = 0;
-        std::string temp = cmd;
-        
-        while ((pos = temp.find(' ')) != std::string::npos) {
-            parts.push_back(temp.substr(0, pos));
-            temp.erase(0, pos + 1);
-        }
-        parts.push_back(temp);
+        std::vector<std::string> parts = split_command_args(cmd);
         
         if (parts.size() >= 5) {
             std::string host = parts[1];
@@ -989,18 +982,9 @@ void SSHTerminal::execute_command(const std::string& cmd)
         for (auto& part : parts) {
             vault::wipe(part);
         }
-        vault::wipe(temp);
     }
     else if (cmd.rfind("sshkey ", 0) == 0) {
-        std::vector<std::string> parts;
-        size_t pos = 0;
-        std::string temp = cmd;
-        
-        while ((pos = temp.find(' ')) != std::string::npos) {
-            parts.push_back(temp.substr(0, pos));
-            temp.erase(0, pos + 1);
-        }
-        parts.push_back(temp);
+        std::vector<std::string> parts = split_command_args(cmd);
         
         if (parts.size() >= 5) {
             std::string host = parts[1];
@@ -1039,7 +1023,6 @@ void SSHTerminal::execute_command(const std::string& cmd)
         for (auto& part : parts) {
             vault::wipe(part);
         }
-        vault::wipe(temp);
     }
     else if (cmd == "profile" || cmd == "profiles" ||
              cmd.rfind("profile ", 0) == 0 || cmd.rfind("profiles ", 0) == 0) {
@@ -1066,14 +1049,14 @@ void SSHTerminal::execute_command(const std::string& cmd)
     else if (cmd == "help") {
         append_text("Available commands:\n");
         append_text("  menu - Home menu (also 'exit' when not connected)\n");
-        append_text((std::string("  chat - ChatGPT (") + board::HINT_TALK + " to talk)\n").c_str());
+        append_text((std::string("  chat - ChatGPT (") + board::HINT_TALK + " to talk; in SSH, to type by voice)\n").c_str());
         append_text("  wifi - WiFi menu: scan, pick a network, save it\n");
         append_text("  wifi scan|saved|list|forget|off\n");
         append_text("  portal - Sign in to the network's web page (cafe, hotel)\n");
         append_text("  connect - Scan and pick a WiFi network\n");
         append_text("  connect <SSID> <PASSWORD> - Connect to WiFi\n");
         append_text("    Use quotes for spaces: connect \"My WiFi\" password\n");
-        append_text("  ssh <HOST> <PORT> <USER> <PASS> - Connect via SSH\n");
+        append_text("  ssh <HOST> <PORT> <USER> <PASS> - Connect via SSH (quote a password with spaces)\n");
         append_text("  sshkey <HOST> <PORT> <USER> <KEYFILE> [PASSPHRASE] - SSH with key\n");
         append_text("    Note: Place .pem keys in /sdcard/ssh_keys/ before use\n");
         append_text("  profile - Saved connection profiles menu\n");
@@ -1736,6 +1719,8 @@ int SSHTerminal::waitsocket(int socket_fd, LIBSSH2_SESSION *session)
 
 // Upper bound on waitsocket() rounds (2 s each) for one SSH protocol step
 static const int SSH_MAX_WAITS = 15;
+// Shorter for keystrokes: a stalled link must not freeze the keypad task for long
+static const int SSH_KEY_MAX_WAITS = 3;
 
 // libssh2 global state is initialized once and kept for the life of the app
 static bool ensure_libssh2_init()
@@ -1786,6 +1771,12 @@ esp_err_t SSHTerminal::ssh_begin(PendingSsh&& target)
     }
     if (ssh_connected || session) {
         append_text("Already connected. Type 'exit' to disconnect first.\n");
+        wipe_pending_ssh();
+        return ESP_FAIL;
+    }
+    if (t.port < 1 || t.port > 65535) {
+        // htons() would wrap it to another port, and known_hosts would key on the unwrapped value
+        append_text("ERROR: Port must be 1-65535.\n");
         wipe_pending_ssh();
         return ESP_FAIL;
     }
@@ -2288,7 +2279,7 @@ void SSHTerminal::create_side_panel()
         lv_obj_set_size(btn, ui.button_w, ui.button_h);
         lv_obj_align(btn, LV_ALIGN_TOP_MID, 0, (row++ + 1) * (ui.button_h + ui.gap + 1));
         lv_obj_set_style_bg_color(btn, lv_color_hex(theme::DIVIDER), 0);
-        lv_obj_set_style_bg_color(btn, lv_color_hex(theme::ACCENT), LV_STATE_PRESSED);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(theme::ACCENT_BG), LV_STATE_PRESSED);
         lv_obj_set_style_shadow_width(btn, 0, 0);
         
         lv_obj_t* btn_label = lv_label_create(btn);
@@ -2402,9 +2393,27 @@ void SSHTerminal::send_special_key(const char* sequence)
 // Sends raw bytes (control keys) to the SSH session
 void SSHTerminal::write_channel(const char* data, size_t len)
 {
+    size_t nwritten = 0;
+    int waits = 0;
+
     xSemaphoreTake(ssh_mutex, portMAX_DELAY);
-    if (channel) {
-        libssh2_channel_write(channel, data, len);
+    // The channel is non-blocking: a full send window or a short write must be retried, or the
+    // rest of a paste / escape sequence is silently lost
+    while (channel && nwritten < len) {
+        ssize_t n = libssh2_channel_write(channel, data + nwritten, len - nwritten);
+        if (n == LIBSSH2_ERROR_EAGAIN) {
+            if (waitsocket(ssh_socket, session) <= 0 && ++waits >= SSH_KEY_MAX_WAITS) {
+                ESP_LOGE(TAG, "Key send timed out");
+                break;
+            }
+            continue;
+        }
+        if (n < 0) {
+            ESP_LOGE(TAG, "Failed to write to channel: %d", (int)n);
+            break;
+        }
+        nwritten += (size_t)n;
+        waits = 0;
     }
     xSemaphoreGive(ssh_mutex);
 }

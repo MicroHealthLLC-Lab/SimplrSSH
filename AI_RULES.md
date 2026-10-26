@@ -22,9 +22,11 @@ trackball / arrow keys + Enter, a touch, or by typing the row's number; a prompt
 sits under its question. A home menu (`menu` anywhere, `exit` back to it; Ctrl+Del on the Tab5
 and the side panel's Menu button return to it from any screen, ending SSH or ChatGPT), each app
 a menu of short prompts; ChatGPT as message bubbles; the console (text log) for typed commands.
-Dark theme, symbol-font icons, no images or animations. SSH sessions: on the T-Deck, scrolling
+Dark theme with 7:1 text contrast (`theme::` colors, checked by the `Contrast` guard; text never sits on `ACCENT`, use `ACCENT_BG`), symbol-font icons, no images or animations. SSH sessions: on the T-Deck, scrolling
 text and a line sent with Enter; on the Tab5, a full-screen xterm (TUI programs) with every key
 sent to the server. Keep the T-Deck's terminal as it is.
+In an SSH session, holding the talk key (Tab5: Ctrl on its own; T-Deck: the trackball) records
+speech that ChatGPT's speech-to-text model types at the cursor, without Enter.
 Local commands that are also shell commands (`sleep`, `shutdown`, `poweroff`, `power`) are taken
 only while no SSH session is open; in a session they go to the server.
 
@@ -35,7 +37,8 @@ only while no SSH session is open; in a session they go to the server.
 - No telemetry, analytics, OTA, web servers, access-point mode, Bluetooth, or background
   network traffic. The only outbound connections allowed are: the WiFi network the user
   picks, DNS for the host the user typed, that SSH server, api.openai.com - only while
-  the user is using ChatGPT, with their own API key, over verified TLS (CA bundle) - and the
+  the user is using ChatGPT (or holds the talk key in an SSH session to type by voice), with
+  their own API key, over verified TLS (CA bundle) - and the
   WiFi network's sign-in page (captive portal) - only while the user runs `portal` (WiFi
   menu: Sign in): one plain-HTTP probe to `connectivitycheck.gstatic.com/generate_204` (the
   network answers it with its page; 204 means online; if that name doesn't resolve, the
@@ -204,21 +207,28 @@ only while no SSH session is open; in a session they go to the server.
   `SimplrSSH-Tab5-v<ver>-release.bin` (launcher: `build-tab5/SimplrSSH-Tab5-v<ver>-launcher.bin`).
   Tab5 settings: `sdkconfig.defaults` then `sdkconfig.defaults.esp32p4`, committed result
   `sdkconfig.tab5`. Both boards share `partitions.csv` / `partitions_launcher.csv`.
-- After changing `main/idf_component.yml`, refresh both lock files. The component manager
-  re-solves after installing (see `check_dependencies.py`, KNOWN_DRIFT), so keep the locked
-  versions: only the solver's first pass belongs in a lock file.
+- Builds compile exactly the lock files; nothing published upstream changes a build. After
+  changing `main/idf_component.yml`, regenerate both lock files (and `sdkconfig` /
+  `sdkconfig.tab5`) with `idf.py reconfigure` in a clean copy (no build dir, no
+  `managed_components/`) and commit them. Keep the `sdkconfig.json` seed in `CMakeLists.txt`:
+  without it a clean build re-runs the component manager, which re-solves from the registry
+  and takes the newest releases. The install job fails on any difference
+  (`check_dependencies.py`); never add an allowance for one.
 - Match the surrounding style (4-space indent, `snake_case`, brace on its own line for
   functions, same line for control flow).
 - CI must build, and the **Tests** workflow (`.github/workflows/tests.yml`) must pass: it runs
-  on every push and pull request, and releases wait for it. Its jobs, in order: install
-  (components match each board's lock), lint (actionlint, ruff, cppcheck), typecheck,
-  unit-tests, persistence, build (both boards: RAM budget, zero compiler warnings in `main/`, no
-  key material), audit (CVEs), network-surface (linked symbols, generated sdkconfig), secret-scan.
+  on every push and pull request, and releases wait for it. Its jobs: install (components
+  match each board's lock) first; then lint (actionlint, ruff, cppcheck), typecheck,
+  unit-tests and persistence in parallel, each needing only install; then build (both boards:
+  RAM budget, zero compiler warnings in `main/`, no key material), which needs all of them;
+  then network-surface (linked symbols, generated sdkconfig) on build's artifacts. No security scan runs
+  in Tests: secret scanning and the firmware CVE audit run in the Security scan workflow below.
   The code-quality workflow stays advisory.
 - The **Security scan** workflow (`.github/workflows/security-scan.yml`) calls MicroHealth's
   shared `security-scan.yml` (`MicroHealthLLC/sast-rules`, called `@main` — its release branch, so every run
   uses the newest release with no pin to move): SAST, Trivy,
-  SBOM and ZAP DAST, one report. Every scanner stays on (test/guards/test_supply_chain.py,
+  SBOM and ZAP DAST, one report; beside it its `firmware-audit` job (esp-idf-sbom CVEs of both
+  boards' images against the NVD, `.github/scripts/check_audit.py`). Every scanner stays on (test/guards/test_supply_chain.py,
   `SecurityScan`). Before pushing run `scripts/check.sh` (guards, host tests, then
   `scripts/sast.sh` with the same rules); if SAST can't run locally, say so in the PR.
   `scripts/sast.sh` is copied from sast-rules unchanged (it resolves the same `@main`); never edit it. Suppress a finding

@@ -69,7 +69,7 @@ class ActionsPinned(unittest.TestCase):
             for var, ref in re.findall(r"(?m)^\s*(\w*IMAGE\w*):\s*([\w.-]+/[^\s#]+:[^\s#]+)", code):
                 with self.subTest(workflow=name, variable=var):
                     self.assertRegex(ref, r"@sha256:[0-9a-f]{64}$")
-            for ref in re.findall(r"(?:espressif/idf|zricethezav/gitleaks|koalaman/shellcheck):[^\s'\"]*", code):
+            for ref in re.findall(r"(?:espressif/idf|koalaman/shellcheck):[^\s'\"]*", code):
                 with self.subTest(workflow=name, image=ref):
                     self.assertRegex(ref, r"@sha256:[0-9a-f]{64}$")
 
@@ -195,6 +195,30 @@ class ComponentsPinned(unittest.TestCase):
         self.assertRegex(cmake, r'IDF_TARGET STREQUAL "esp32p4"\)\s*\n\s*idf_build_set_property\(DEPENDENCIES_LOCK '
                                 r'"\$\{CMAKE_CURRENT_LIST_DIR\}/dependencies.lock.esp32p4"\)')
 
+    def test_builds_compile_the_lock(self):
+        # A clean build must not make ESP-IDF re-run the component manager (the re-run
+        # re-solves from the registry): CMakeLists.txt seeds sdkconfig.json before project()
+        cmake = repo.read("CMakeLists.txt")
+        seed = cmake.find('file(WRITE "${seed_json}"')
+        self.assertGreater(seed, 0, "seed build/config/sdkconfig.json in CMakeLists.txt")
+        self.assertLess(seed, cmake.index("project(SimplrSSH)"))
+        self.assertIn('"${CMAKE_BINARY_DIR}/config/sdkconfig.json"', cmake)
+
+    def test_lock_rules_see_their_kconfig_options(self):
+        # Every $CONFIG{...} a locked component's rules read must be in the board's sdkconfig
+        # as a yes/no or number option, the kinds CMakeLists.txt seeds. An '&&' rule stops at
+        # its first option that is off (later ones may not exist then, e.g. LV_USE_LZ4_INTERNAL).
+        for lock_name, sdkconfig in (("dependencies.lock", "sdkconfig"),
+                                     ("dependencies.lock.esp32p4", "sdkconfig.tab5")):
+            config = repo.read(sdkconfig)
+            rules = re.findall(r"(?ms)^\s+- if: (.*?)\n\s+version:", repo.read(lock_name))
+            for rule in (r for r in rules if "$CONFIG{" in r):
+                for key in re.findall(r"\$CONFIG\{(\w+)\}", rule):
+                    with self.subTest(lock=lock_name, option=key):
+                        self.assertRegex(config, rf"(?m)^(CONFIG_{key}=(y|-?\d+)|# CONFIG_{key} is not set)$")
+                    if "||" not in rule and f"# CONFIG_{key} is not set" in config:
+                        break
+
     def test_ci_idf_version_matches_manifest(self):
         idf = re.search(r"(?m)^  idf:\s*\n\s+version:\s*'([^']+)'", repo.read("main", "idf_component.yml")).group(1)
         build = repo.read(".github", "workflows", "build.yml")
@@ -222,6 +246,18 @@ class SecurityScan(unittest.TestCase):
             with self.subTest(scanner=scanner):
                 self.assertNotRegex(text, rf"(?m)^\s*{scanner}:\s*false", "every scanner stays on")
         self.assertIn("zap_target: ${{ vars.ZAP_TARGET_URL }}", text)
+
+    def test_security_scans_run_only_in_security_scan(self):
+        # The Tests workflow is for tests; the firmware CVE audit (which Trivy cannot do: it
+        # does not read ESP-IDF component locks) runs in security-scan.yml instead.
+        scan = repo.read(".github", "workflows", "security-scan.yml")
+        self.assertRegex(scan, r"(?m)^  firmware-audit:\s*$")
+        self.assertIn("esp-idf-sbom", scan)
+        self.assertIn(".github/scripts/check_audit.py", scan)
+        tests = repo.read(".github", "workflows", "tests.yml")
+        for marker in ("esp-idf-sbom", "check_audit.py", "gitleaks"):
+            with self.subTest(marker=marker):
+                self.assertNotIn(marker, re.sub(r"(?m)^\s*#.*$", "", tests))
 
     def test_local_sast_uses_the_same_rules(self):
         sast = repo.path("scripts", "sast.sh")

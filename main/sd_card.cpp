@@ -13,6 +13,7 @@
 #include "diskio_sdmmc.h"
 #include "driver/gpio.h"
 #include <cstring>
+#include "mbedtls/platform_util.h"
 #include <cstdlib>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -348,7 +349,7 @@ int sdcard::load_ssh_keys(SSHTerminal* terminal)
         
         if (bytes_read != (size_t)file_size) {
             ESP_LOGE(TAG, "Failed to read complete key file: %s", entry->d_name);
-            memset(key_data, 0, file_size);
+            mbedtls_platform_zeroize(key_data, file_size);
             free(key_data);
             continue;
         }
@@ -357,7 +358,7 @@ int sdcard::load_ssh_keys(SSHTerminal* terminal)
         
         // Load key into terminal's memory
         terminal->load_key_from_memory(entry->d_name, key_data, file_size);
-        memset(key_data, 0, file_size);  // Don't leave a copy of the private key in freed heap
+        mbedtls_platform_zeroize(key_data, file_size);  // Don't leave a copy of the private key in freed heap
         free(key_data);
         keys_loaded++;
     }

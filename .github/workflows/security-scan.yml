@@ -4,8 +4,11 @@ name: Security scan
 # (dependencies, secrets, misconfiguration), the CycloneDX SBOM and ZAP DAST,
 # in parallel, ending in ONE report (the `security-report` artifact). Every
 # scanner is on; switch one off with its input (`sast: false`, `trivy: false`,
-# `sbom: false`, `zap: false`). It sits beside the Tests workflow (the release
-# gate, with its firmware CVE audit); it does not gate releases.
+# `sbom: false`, `zap: false`). Beside it, this repository's own firmware-audit
+# job: the CVE audit of what the firmware is built from (esp-idf-sbom against
+# the NVD), which Trivy cannot do because it does not read ESP-IDF component
+# locks. Every security scan runs here, none in the Tests workflow (the release
+# gate); this workflow does not gate releases.
 #
 # Called @main, not pinned: sast-rules' main IS its release branch (every
 # scan change pushed to main is released) and its workflows resolve their own
@@ -32,6 +35,10 @@ permissions:
 concurrency:
   group: security-scan-${{ github.ref }}
   cancel-in-progress: true
+env:
+  # ESP-IDF v5.5.1, pinned by digest; same image as tests.yml and build.yml
+  IDF_IMAGE: espressif/idf:v5.5.1@sha256:dfa2d076c796769c07c155eba6c672b9f395aec943b2ba3701b73379b5f9e884
+  ESP_IDF_SBOM_VERSION: 1.4.0
 jobs:
   security:
     permissions: {contents: read, actions: read, security-events: write, id-token: write}
@@ -41,3 +48,62 @@ jobs:
       zap_target: ${{ vars.ZAP_TARGET_URL }}
       baseline_ref: ${{ github.base_ref }}
     secrets: inherit
+
+  # firmware-audit: CVEs in what the firmware is built from. Both boards are built in the
+  # pinned ESP-IDF image and esp-idf-sbom writes each image's SBOM, then queries the NVD.
+  # High/critical findings fail the job unless reviewed into .github/audit-baseline.txt;
+  # any known exploited vulnerability fails it (.github/scripts/check_audit.py). Moved
+  # here from the Tests workflow's audit job unchanged, with the build steps it took its
+  # SBOMs from.
+  firmware-audit:
+    name: firmware-audit
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Pull ESP-IDF image (retries transient registry errors)
+        run: |
+          for attempt in 1 2 3 4; do
+            docker pull "$IDF_IMAGE" && exit 0
+            echo "Pull failed (attempt $attempt), retrying..."
+            sleep $((attempt * 15))
+          done
+          exit 1
+      # Root in the container (pip installs into the IDF Python environment); the files
+      # are handed back to the runner user at the end. The T-Deck first, then the Tab5 from an
+      # empty managed_components/ (the boards' components differ) into build-tab5/.
+      - name: Build firmware and SBOM (both boards)
+        run: |
+          docker run --rm -v "$PWD:/project" -w /project -e "OWNER=$(id -u):$(id -g)" \
+            -e "SBOM_VERSION=$ESP_IDF_SBOM_VERSION" "$IDF_IMAGE" bash -c '
+              set -eo pipefail
+              trap "chown -R \"\$OWNER\" /project" EXIT
+              git config --global --add safe.directory "*"
+              pip install --quiet "esp-idf-sbom==$SBOM_VERSION"
+              idf.py build
+              esp-idf-sbom create build/project_description.json -o build/sbom.spdx
+              rm -rf managed_components
+              TAB5="-B build-tab5 -D IDF_TARGET=esp32p4 -D SDKCONFIG=sdkconfig.tab5"
+              idf.py $TAB5 build
+              esp-idf-sbom create build-tab5/project_description.json -o build-tab5/sbom.spdx'
+      - name: Vulnerability report (esp-idf-sbom check, retries NVD hiccups)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet "esp-idf-sbom==$ESP_IDF_SBOM_VERSION"
+          for board in build build-tab5; do
+            for attempt in 1 2 3; do
+              # Exits 1 when it finds vulnerabilities; check_audit.py judges the report
+              "$RUNNER_TEMP/venv/bin/esp-idf-sbom" --no-progress check --format json -o "vulns-$board.json" \
+                "$board/sbom.spdx" || true
+              [ -s "vulns-$board.json" ] && grep -q '"records"' "vulns-$board.json" && continue 2
+              echo "No report for $board (attempt $attempt), retrying..."
+              sleep $((attempt * 30))
+            done
+            exit 1
+          done
+      - name: High / critical CVEs
+        run: |
+          python3 .github/scripts/check_audit.py vulns-build.json
+          python3 .github/scripts/check_audit.py vulns-build-tab5.json

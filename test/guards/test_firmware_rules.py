@@ -90,6 +90,11 @@ class Tasks(unittest.TestCase):
     def test_no_busy_wait(self):
         self.assertEqual(grep(r"while\s*\(\s*(1|true)\s*\)\s*;"), [])
 
+    def test_recording_loop_ends_when_the_microphone_returns_nothing(self):
+        # mic_read() returns 0 on a read error; the loop would then spin without waiting
+        code = SRC["main/chat_app.cpp"]
+        self.assertRegex(code, r"size_t got = audio::mic_read\([^;]*;\s*if \(got == 0\) \{\s*break;")
+
 
 class Bounds(unittest.TestCase):
     def test_collection_bounds(self):
@@ -118,6 +123,14 @@ class Bounds(unittest.TestCase):
         cookies = int(re.search(r"MAX_COOKIES = (\d+);", header).group(1))
         self.assertIn(f"sign-in pages {page_kb} KB in PSRAM / {fields} fields / {cookies} cookies", rules)
         self.assertIn("MALLOC_CAP_SPIRAM", SRC["main/portal_client.cpp"])
+
+
+class KnownHosts(unittest.TestCase):
+    def test_host_key_records_not_read_into_a_fixed_buffer(self):
+        # A long host name made the record exceed a 160-byte buffer: the read failed, a changed
+        # key then looked like a new server (Unknown) instead of a mismatch
+        code = SRC[os.path.join("main", "known_hosts.cpp")]
+        self.assertEqual(re.findall(r"char value\[\d+\]", code), [])
 
 
 class Logging(unittest.TestCase):
@@ -191,6 +204,27 @@ BOARD_CONFIGS = {
     "sdkconfig": ["sdkconfig.defaults"],
     "sdkconfig.tab5": ["sdkconfig.defaults", "sdkconfig.defaults.esp32p4"],
 }
+
+
+class Dictation(unittest.TestCase):
+    # AI_RULES.md: in an SSH session the talk key types speech at the cursor, without Enter
+    @staticmethod
+    def body(name):
+        return SRC["main/chat_app.cpp"].split(f"SSHTerminal::{name}(", 1)[1].split("\n}", 1)[0]
+
+    def test_transcript_is_one_printable_line(self):
+        # Untrusted text from the network: printable ASCII, bounded, no Enter or control codes
+        self.assertIn("portal::printable(heard, MAX_DICTATION)", self.body("dictate_job"))
+
+    def test_typed_only_into_the_session_it_was_spoken_in(self):
+        tick = self.body("dictate_tick")
+        self.assertIn("ssh_generation == dictate_ssh_generation", tick)
+        self.assertNotIn("\\r", tick)
+        self.assertNotIn("\\n", tick)
+
+    def test_slow_ctrl_key_drops_the_recording(self):
+        self.assertIn("INPUT_HOLD_CANCEL", SRC["main/tab5_keymap.cpp"])
+        self.assertIn("cancel_talk()", SRC["main/deck_base.cpp"])
 
 
 class SdkconfigDefaults(unittest.TestCase):
@@ -338,6 +372,47 @@ class Ui(unittest.TestCase):
                 if any(b > 0x7F for b in line):
                     with self.subTest(file=os.path.relpath(f, repo.ROOT), line=i):
                         self.fail("non-ASCII byte: use plain ASCII or an escape sequence")
+
+
+class Contrast(unittest.TestCase):
+    """WCAG 2.2 AAA 1.4.6: theme text colors reach 7:1 against the fills they sit on."""
+
+    @staticmethod
+    def theme():
+        text = repo.read("main", "include", "ui_view.hpp")
+        return {k: int(v, 16) for k, v in re.findall(r"uint32_t (\w+) = 0x([0-9A-Fa-f]{6});", text)}
+
+    @staticmethod
+    def lum(h):
+        chan = [((h >> s) & 255) / 255 for s in (16, 8, 0)]
+        chan = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in chan]
+        return 0.2126 * chan[0] + 0.7152 * chan[1] + 0.0722 * chan[2]
+
+    def ratio(self, a, b):
+        hi, lo = sorted((self.lum(a), self.lum(b)), reverse=True)
+        return (hi + 0.05) / (lo + 0.05)
+
+    def test_text_pairs_reach_7_to_1(self):
+        t = self.theme()
+        white = 0xFFFFFF
+        pairs = [(fg, bg) for fg in ("TEXT", "DIM", "DANGER", "OK", "WARN") for bg in ("BG", "SURFACE", "DIVIDER")
+                 ]
+        for fg, bg in pairs:
+            with self.subTest(fg=fg, bg=bg):
+                self.assertGreaterEqual(self.ratio(t[fg], t[bg]), 7.0)
+        for fg in (white, 0xE6EDF3):  # white and the selected row's dim text on the accent fill
+            with self.subTest(fg=hex(fg), bg="ACCENT_BG"):
+                self.assertGreaterEqual(self.ratio(fg, t["ACCENT_BG"]), 7.0)
+        self.assertGreaterEqual(self.ratio(t["ACCENT"], t["BG"]), 3.0, "focus outline needs 3:1 (1.4.11)")
+
+    def test_terminal_ansi_colors_reach_7_to_1_on_black(self):
+        text = repo.read("main", "term_view.cpp")
+        block = re.search(r"ANSI\[16\] = \{(.*?)\};", text, re.S).group(1)
+        colors = [int(v, 16) for v in re.findall(r"0x([0-9A-Fa-f]{6})", block)]
+        self.assertEqual(len(colors), 16)
+        for i, c in enumerate(colors[1:], 1):
+            with self.subTest(index=i):
+                self.assertGreaterEqual(self.ratio(c, 0), 7.0)
 
 
 if __name__ == "__main__":

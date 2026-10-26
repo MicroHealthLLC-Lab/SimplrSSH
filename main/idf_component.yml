@@ -3,12 +3,13 @@
 ## transitive ones: dependencies.lock for the T-Deck (esp32s3), dependencies.lock.esp32p4 for
 ## the Tab5 (CMakeLists.txt picks one by target). Update them together: change a version here,
 ## then run `idf.py update-dependencies` for each board (see AI_RULES.md, Workflow) and commit
-## both lock files. Components used by one board only carry a target rule.
+## both lock files; the build compiles exactly what they hold (CI's install job checks it).
+## Components used by one board only carry a target rule.
 dependencies:
   ## Required IDF version (CI builds with v5.5.1)
   idf:
     version: '~5.5.1'
-  lvgl/lvgl: '9.4.0'
+  lvgl/lvgl: '9.6.0~1'
   skuodi/libssh2_esp: '1.1.0'
   ## LilyGO T-Deck (esp32s3)
   espressif/esp_bsp_generic:
@@ -24,12 +25,12 @@ dependencies:
     rules:
       - if: 'target == esp32s3'
   espressif/led_strip:
-    version: '3.0.3'   # Not used directly: esp_bsp_generic's led_indicator needs it; pinned
-    rules:             # because the component manager re-solves and would take newer releases
+    version: '3.1.1'   # Not used directly: esp_bsp_generic's led_indicator needs it; pinned
+    rules:             # so a new release can't change the lock when it is regenerated
       - if: 'target == esp32s3'
   espressif/button:
     version: '4.2.1'   # Not used directly: esp_bsp_generic needs it; pinned like led_strip
-    rules:             # (the re-solve took 4.2.2, published 2026-10-14)
+    rules:
       - if: 'target == esp32s3'
   ## M5Stack Tab5 (esp32p4)
   espressif/m5stack_tab5:
@@ -47,4 +48,8 @@ dependencies:
   espressif/esp_wifi_remote:
     version: '1.6.5'   # esp_wifi_* API on the ESP32-P4, backed by esp_hosted
     rules:
+      - if: 'target == esp32p4'
+  espressif/esp_sccb_intf:
+    version: '1.0.0'   # Not used directly: the BSP's esp_cam_sensor needs it ('>=0.0.5'); pinned
+    rules:             # like led_strip
       - if: 'target == esp32p4'

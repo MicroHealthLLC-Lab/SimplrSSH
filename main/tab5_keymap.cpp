@@ -108,26 +108,26 @@ void Tab5Keymap::key_event(bool pressed, int row, int col, uint32_t now_ms)
             // Ctrl on its own is push-to-talk once held for HOLD_MS (tick)
             talk_down = true;
             talk_holding = false;
-            talk_used = false;
             talk_pressed_ms = now_ms;
         } else if (talk_down) {
             talk_down = false;
             if (talk_holding) {
                 talk_holding = false;
-                // A long hold deletes a history entry outside ChatGPT: only when Ctrl was alone
-                bool long_hold = !talk_used && now_ms - talk_pressed_ms >= LONG_HOLD_MS;
+                // A long hold deletes a history entry outside ChatGPT and SSH
+                bool long_hold = now_ms - talk_pressed_ms >= LONG_HOLD_MS;
                 push(KEY_EVENT | (long_hold ? INPUT_HOLD_END_LONG : INPUT_HOLD_END));
             }
         }
         return;
     }
     if (pressed && talk_down) {
-        // Another key with Ctrl: a control code (Ctrl+C ...), not talking
+        // Another key with Ctrl: a control code (Ctrl+C ...), not talking. A recording already
+        // started is dropped, so a slow Ctrl+C never sends speech or types it into a shell.
         if (talk_holding) {
-            talk_used = true;
-        } else {
-            talk_down = false;
+            push(KEY_EVENT | INPUT_HOLD_CANCEL);
         }
+        talk_down = false;
+        talk_holding = false;
     }
     if (is_sym(row, col)) {
         sym = pressed;
@@ -206,6 +206,6 @@ void Tab5Keymap::reset()
         push(KEY_EVENT | INPUT_HOLD_END);   // Stop a recording in progress
     }
     sym = ctrl = alt = aa_down = aa_used = one_shot = caps_lock = false;
-    talk_down = talk_holding = talk_used = false;
+    talk_down = talk_holding = false;
     repeat_key = -1;
 }

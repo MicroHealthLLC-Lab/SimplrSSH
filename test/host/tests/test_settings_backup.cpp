@@ -218,10 +218,12 @@ TEST(restore_rejects_untrusted_backups)
     expect_rejected(header + "storage hist_0 s 686\n");                     // Odd hex length
     expect_rejected(header + "storage hist_0 s 680069\n");                  // NUL inside a string
     expect_rejected(header + "storage hist_0 s " + std::string(8002, '6') + "\n");  // String > 4000
+    expect_rejected(header + "storage hist_0 s " + std::string(8000, '6') + "\n");  // 4000 bytes + NUL: past NVS's limit
     expect_rejected(header + "vault s0011 b " + std::string(2050, 'a') + "\n");     // Blob > 1024
     expect_rejected(header + "vault s0011 b \n");                           // Empty blob
     expect_rejected(header + "storage hist_count u 12x\n");                 // Not a number
     expect_rejected(header + "storage hist_count u 12345678901\n");        // Too many digits
+    expect_rejected(header + "storage hist_count u 4294967296\n");        // Past a 32-bit value
     expect_rejected(header + "storage hist_0 x 6869\n");                    // Unknown type
     expect_rejected(header + "storage hist_0  s 6869\n");                   // Malformed spacing
     expect_rejected(header + std::string(9000, 'a') + "\n");               // Line too long

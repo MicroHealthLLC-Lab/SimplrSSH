@@ -60,6 +60,7 @@ void SSHTerminal::background_tick()
         go_home();
     }
     wifi_maintain();
+    dictate_tick();   // Words spoken in an SSH session go to the cursor
     sync_view();   // Ends a progress page left by a blocking step
 }
 

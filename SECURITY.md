@@ -3,7 +3,8 @@
 SimplrSSH is a handheld SSH client for the LilyGO T-Deck (ESP32-S3) and the M5Stack Tab5
 (ESP32-P4, WiFi through an ESP32-C6 co-processor), built from one source tree. Its job is to join a
 WiFi network the user picks, open SSH sessions to servers the user enters, talk to
-api.openai.com only when the user opens ChatGPT with their own API key, and load the WiFi
+api.openai.com only when the user opens ChatGPT or dictates in an SSH session (holding the talk
+key), with their own API key, and load the WiFi
 network's sign-in page (captive portal) only when the user runs `portal`. It should talk to
 nothing else.
 
@@ -20,7 +21,7 @@ vulnerability") rather than a public issue.
 | SSH session | Network attacker impersonating the server (MITM) | Host key fingerprints, trust on first use, changed keys refused |
 | Secrets in use | Shoulder surfing, serial logs, command history | Masked input and echo, no secret logging, secrets kept out of history, buffers wiped after use |
 | OpenAI API key | Leaking through backups, logs or plain text | Stored in the vault like other passwords (PIN-protected if set); sent only to api.openai.com over TLS verified with the ESP-IDF CA bundle |
-| Chat content and voice | Unexpected destinations | Sent only to OpenAI, only while the user is in ChatGPT; the chat stays in RAM (not saved); recordings are freed after transcription |
+| Chat content and voice | Unexpected destinations | Sent only to OpenAI, only while the user is in ChatGPT or holds the talk key in an SSH session; the chat stays in RAM (not saved); recordings are freed after transcription |
 | Typed sign-in details (name, email, room or voucher code) and portal cookies | Being kept or sent elsewhere | Sent only to the form's own address, chosen by the page the user is on; kept in RAM only and wiped when the sign-in ends; never logged or saved. Password fields are masked; on a page without HTTPS the user is warned before typing one |
 | Device | Unexpected network exposure | Station-only WiFi (no access point / DHCP server), IPv4 only, no listening sockets, no telemetry/OTA/cloud |
 
@@ -109,8 +110,10 @@ a release waits for it to pass on the same commit. Security-relevant gates:
 - **Secrets**: host tests check that the vault never stores or logs plaintext, that tampered or
   moved ciphertext is rejected, that PINs use the slow key derivation, and that typed passwords
   are redacted from echo and history; guard tests reject log statements that print user input
-  or secrets; gitleaks scans the new commits; the built images are scanned for private keys and
-  API keys (with a planted-key negative control).
+  or secrets; the built images are scanned for private keys and API keys (with a planted-key
+  negative control). Secret scanning of the source runs in the Security scan workflow
+  (`.github/workflows/security-scan.yml`, Trivy's secret scanner over the repository on every
+  push to `main` and `integration` and every pull request), not in Tests.
 - **Untrusted SD card input**: restore tests feed damaged and hostile backups (unknown
   namespaces, the device-key namespace, oversized or malformed records) and check that the
   device is left unchanged.
@@ -122,9 +125,11 @@ a release waits for it to pass on the same commit. Security-relevant gates:
   exception is MicroHealth's own `sast-rules` workflows, called `@main` by the owner's decision
   so the security scan always runs the newest release — `SAST_RULES_AT_MAIN` in
   `test/guards/test_supply_chain.py`), components installed
-  only at the locked versions with verified hashes (each board has its own lock file), and a CVE
-  audit (esp-idf-sbom, NVD) of ESP-IDF, its libraries and the components of both images that
-  blocks on new high/critical findings.
+  only at the locked versions with verified hashes (each board has its own lock file).
+
+The CVE audit of the firmware (esp-idf-sbom, NVD: ESP-IDF, its libraries and the components of
+both images, failing on new high/critical findings and on any known exploited one) is not part
+of Tests: it runs as the `firmware-audit` job of the Security scan workflow below.
 
 Outside the Tests workflow, `.github/workflows/security-scan.yml` runs MicroHealth's shared
 security scan (`MicroHealthLLC/sast-rules`, called `@main`: its release branch, so every run uses the
@@ -132,12 +137,13 @@ newest release with no pin to move) on every push to `main` and
 `integration`, every pull request, nightly and on demand: SAST (Opengrep with MicroHealth's
 rules), Trivy (dependencies, secrets and misconfiguration in the repository), a CycloneDX SBOM
 and ZAP DAST, in parallel, ending in one `security-report` (each scanner's status and counts by
-severity). Every scanner is on. A scanner that was on and left no report fails the run; a count
+severity), and beside them the `firmware-audit` job (the firmware CVE audit above). Every
+scanner is on. A scanner that was on and left no report fails the run; a count
 is shown only for a scanner that ran, so "did not run" never reads as "found nothing". It does
-not gate releases (the Tests workflow does), and findings are not a release blocker unless the
-Tests audit also reports them. SimplrSSH is firmware with no web endpoint, so ZAP has nothing
+not gate releases (the Tests workflow does): a failing `firmware-audit` or any other finding
+here does not stop a release on its own. SimplrSSH is firmware with no web endpoint, so ZAP has nothing
 to scan unless `ZAP_TARGET_URL` is set; until then the report shows ZAP as not run, with the
-reason. Trivy does not understand ESP-IDF component locks; the CVE audit above remains the
+reason. Trivy does not understand ESP-IDF component locks; `firmware-audit` remains the
 check for the firmware's own components. SAST findings also go to GitHub code scanning.
 Only full scans of `main` feed MicroHealth's security reports: `integration`'s are kept apart
 and never ingested, and a pull request's stay run artifacts (SAST there reports only what is
@@ -165,7 +171,7 @@ Found while introducing these checks:
 | Finding | Status |
 |---|---|
 | WiFi network names (SSIDs) were written to the serial log | Fixed: removed from all log lines |
-| The ESP-IDF v5.5.1 component manager re-solves dependencies after installing the locked ones, so builds compiled LVGL 9.6.0~1, cmake_utilities 1.1.1 and led_strip 3.1.0~1 (unused; pulled in by the T-Deck BSP) instead of the locked 9.4.0 / 0.5.3 / 3.0.3 (builds were not reproducible from `dependencies.lock`) | Open: the exact drifted versions are pinned in `.github/scripts/check_dependencies.py`, so any further change fails the gate. Fix by regenerating the lock so both passes agree (changes the firmware; needs testing on a T-Deck) |
+| The ESP-IDF v5.5.1 component manager re-solves dependencies after installing the locked ones, so builds compiled LVGL 9.6.0~1, cmake_utilities 1.1.1 and led_strip 3.1.1 (unused; pulled in by the T-Deck BSP; 3.1.0~1 until 3.1.1 was published) instead of the locked 9.4.0 / 0.5.3 / 3.0.3, and the Tab5 esp_sccb_intf 1.0.0 (unused; pulled in by the Tab5 BSP's camera driver) instead of 0.0.9 (builds were not reproducible from the lock files) | Fixed (2026-10-22): the re-solve came from ESP-IDF re-running the component manager on a clean build (it could not read LVGL's `$CONFIG{...}` rules yet); `CMakeLists.txt` now seeds `build/config/sdkconfig.json` so it runs once. The locks pin the versions released firmware compiled (LVGL 9.6.0~1, led_strip 3.1.1, esp_sccb_intf 1.0.0; cmake_utilities, a build helper, back to its locked 0.5.3) with a current manifest hash, and the install job fails on any re-run, rewritten lock or difference |
 | ESP-IDF v5.5.1 and its bundled mbedTLS 3.6.4 have published high/critical CVEs (11 at the time) | Open: listed in `.github/audit-baseline.txt` pending an ESP-IDF upgrade (needs testing on a T-Deck); not yet assessed for reachability |
 
 ### M5Stack Tab5 support (2026-10-05)
@@ -212,7 +218,7 @@ Scope): sign-in pages are now an allowed destination, only while the user runs `
 
 | Change | Security review |
 |---|---|
-| New outbound traffic: a plain-HTTP request to `connectivitycheck.gstatic.com/generate_204` (if that name doesn't resolve: the network's own gateway, `http://<gateway>/`), then the pages, links and form targets the user picks | Only on the user's request, never automatically (CI guard). Plain HTTP is used for the probe alone, because a portal can only intercept unencrypted traffic; a 204 answer means the internet works. Every HTTPS page is verified with the ESP-IDF CA bundle: a portal with a self-signed certificate fails to load rather than being trusted. Redirects are followed by hand, at most 8, only to http(s) URLs without `user@` parts (IPv4 / DNS names only) |
+| New outbound traffic: a plain-HTTP request to `connectivitycheck.gstatic.com/generate_204` (if that name doesn't resolve: the network's own gateway, `http://<gateway>/`), then the pages, links and form targets the user picks | Only on the user's request, never automatically (CI guard). Plain HTTP is used for the probe alone, because a portal can only intercept unencrypted traffic; a 204 answer means the internet works. Every HTTPS page is verified with the ESP-IDF CA bundle: a portal with a self-signed certificate fails to load rather than being trusted. Redirects are followed by hand, at most 8, only to http(s) URLs (a 307/308 redirect never carries a submitted form from HTTPS to plain HTTP) without `user@` parts (IPv4 / DNS names only) |
 | HTML parser for untrusted pages (`main/portal.cpp`, host-tested with hostile and truncated input under ASan/UBSan) | No scripts run; only a literal `location = "..."` or meta refresh is followed, and only on a page with nothing to fill in. Body capped at 192 KB in PSRAM (zeroed before it is freed); at most 8 forms, 60 fields, 40 options per list, 12 links, 1500 characters of text, 512-byte values, 1 KB URLs. Text reaches the screen as printable ASCII (no control or escape characters). `javascript:`, `data:` and other schemes are dropped |
 | Cookies | Kept in RAM for the sign-in only, at most 30 of 1 KB; a cookie is only accepted for the host that set it or its parent domain (not a bare top-level domain), `Secure` cookies only go over HTTPS, and the jar is wiped when the sign-in ends |
 | A worker task (10 KB stack) per page load | Created per request and deleted when done, like the ChatGPT worker; it touches the menu only under the display lock and drops its result if the user left the sign-in (generation counter) |
@@ -229,6 +235,16 @@ hotspot for those. Hardware behaviour has not been confirmed on a T-Deck or Tab5
 | WiFi network names from a scan are shown in the menus | SSIDs come from the air (any bytes): the WiFi menus show them as printable ASCII, like sign-in pages |
 | LVGL allocates its objects in PSRAM (`main/lv_mem_psram.c`) | Keeps internal RAM for WiFi, TLS and SSH; pages are freed when left |
 | Answers and messages | Menu answers are no longer echoed into the text log; a page's notice shows only messages printed since the last answer (never SSH output), bounded to 1 KB. The back arrow on a prompt wipes a half-typed answer. The side panel's Menu button now posts an event instead of disconnecting SSH inside LVGL's task |
+
+Hardware behaviour has not been confirmed on a T-Deck or Tab5 yet.
+
+### Voice typing in SSH sessions (2026-10-23)
+
+| Change | Security review |
+|---|---|
+| In an SSH session, holding the talk key (Tab5: Ctrl on its own; T-Deck: the trackball) records speech; on release it goes to OpenAI's speech-to-text model with the ChatGPT key, and the words are typed at the cursor (Tab5: sent to the server as keys; T-Deck: into the input line) | Network use only while the user holds the key, to api.openai.com over verified TLS, same client and key as ChatGPT; no new task (the ChatGPT worker, created per recording). The transcript is untrusted: reduced to printable ASCII on one line (`portal::printable`, at most 1000 characters), so no Enter, control codes or escape sequences reach the server, and nothing is run until the user presses Enter. It goes only to the session it was spoken in (`ssh_generation`) and is dropped if that session ended. Nothing is logged, saved or added to command history; recording and transcript buffers are freed / wiped after use |
+| Ctrl pressed with another key while a recording has started (a slow Ctrl+C) | The keymap sends `INPUT_HOLD_CANCEL` before the key: the recording is dropped, never uploaded or typed (also in ChatGPT, where it used to be sent) |
+| Push-to-talk press and release wait up to 1 s for the display lock instead of being dropped | A lost release can no longer leave the microphone recording for 30 s |
 
 Hardware behaviour has not been confirmed on a T-Deck or Tab5 yet.
 

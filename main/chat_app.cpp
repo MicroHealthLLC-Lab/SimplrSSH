@@ -320,7 +320,7 @@ static void init_chat_styles()
     lv_style_set_bg_opa(&s_bubble, LV_OPA_COVER);
     lv_style_set_text_font(&s_bubble, board::ui().input);
     lv_style_init(&s_user);
-    lv_style_set_bg_color(&s_user, lv_color_hex(theme::ACCENT));
+    lv_style_set_bg_color(&s_user, lv_color_hex(theme::ACCENT_BG));
     lv_style_set_text_color(&s_user, lv_color_white());
     lv_style_init(&s_ai);
     lv_style_set_bg_color(&s_ai, lv_color_hex(theme::DIVIDER));
@@ -543,6 +543,7 @@ void SSHTerminal::chat_start_job(bool voice)
     chat_busy = true;
     chat_cancel = false;
     chat_job_voice = voice;
+    chat_job_dictate = false;
     if (xTaskCreate(chat_worker, "chat", WORKER_STACK, this, 4, NULL) != pdPASS) {
         chat_busy = false;
         chat_recording = false;
@@ -556,101 +557,153 @@ void SSHTerminal::chat_start_job(bool voice)
 void SSHTerminal::chat_worker(void* param)
 {
     SSHTerminal* t = (SSHTerminal*)param;
-    t->chat_job();
-    t->chat_ui_banner("");
+    if (t->chat_job_dictate) {
+        t->dictate_job();
+        t->dictate_show("", false);   // Ends the progress shown in the title bar
+    } else {
+        t->chat_job();
+        t->chat_ui_banner("");
+    }
     t->chat_busy = false;
     vTaskDelete(NULL);
+}
+
+// ---------------------------------------------------------------------------
+// Voice: shared by the chat and dictation in SSH, so both work the same way.
+// Run in the worker task; banner() shows progress, info() a message.
+// ---------------------------------------------------------------------------
+
+// Records into PSRAM while the talk key is held (chat_recording), up to 30 s. False if the
+// microphone can't start (info() said so) or the user stopped (chat_cancel); otherwise the
+// caller frees pcm.
+bool SSHTerminal::chat_record(int16_t*& pcm, size_t& samples, const char* release_hint, const Say& banner,
+                              const Say& info)
+{
+    samples = 0;
+    pcm = (int16_t*)heap_caps_malloc(MAX_RECORD_SAMPLES * 2, MALLOC_CAP_SPIRAM);
+    if (!pcm || audio::mic_start() != ESP_OK) {
+        chat_recording = false;
+        heap_caps_free(pcm);
+        pcm = NULL;
+        info("Microphone unavailable.");
+        return false;
+    }
+    size_t n = 0;
+    int shown = -1;
+    while (chat_recording && !chat_cancel && n < MAX_RECORD_SAMPLES) {
+        size_t got = audio::mic_read(pcm + n, std::min<size_t>(1600, MAX_RECORD_SAMPLES - n));
+        if (got == 0) {
+            break;   // The microphone stopped delivering: end here rather than spin
+        }
+        n += got;
+        int secs = n / audio::MIC_RATE;
+        if (secs != shown) {
+            shown = secs;
+            banner("* Recording " + std::to_string(secs) + "s - " + release_hint);
+        }
+    }
+    chat_recording = false;
+    audio::mic_stop();
+    if (chat_cancel) {
+        heap_caps_free(pcm);
+        pcm = NULL;
+        return false;
+    }
+    samples = n;
+    return true;
+}
+
+// What was said, from OpenAI's speech-to-text model. Empty if there was nothing to send, it
+// failed or the user stopped (info() said why).
+std::string SSHTerminal::chat_transcribe(const std::string& key, const std::string& stt_model, int16_t* pcm,
+                                         size_t samples, const Say& banner, const Say& info)
+{
+    size_t skip = std::min(samples, SKIP_SAMPLES);
+    int16_t* voice = pcm + skip;
+    size_t n = samples - skip;
+    std::string heard, error;
+    int level = 0;
+    if (n < audio::MIC_RATE / 2) {
+        info(std::string("Too short - ") + board::HINT_TALK + " while you speak.");
+    } else if ((level = audio::normalize(voice, n)) < MIN_VOICE_PEAK) {
+        // Nothing worth uploading: say so instead of sending silence to OpenAI
+        info("The microphone heard nothing (level " + std::to_string(level) + ") - speak once 'Recording' shows.");
+    } else {
+        banner("Transcribing...");
+        if (openai::transcribe(key, stt_model, voice, n, audio::MIC_RATE, heard, error) != ESP_OK) {
+            heard.clear();
+            info(error);
+        } else if (heard.empty()) {
+            info("Didn't catch that (mic level " + std::to_string(level) + ") - try again.");
+        }
+    }
+    if (chat_cancel) {
+        heard.clear();
+        info("Stopped.");
+    }
+    return heard;
+}
+
+// Once per boot, asks OpenAI for its current models so retired ones are replaced by newer
+// ones; then the exact model names used for this whole request. False if the display stayed busy.
+bool SSHTerminal::chat_job_models(const std::string& key, uint32_t generation, std::string& model,
+                                  std::string& stt_model, std::string& tts_model)
+{
+    if (!chat_models_checked) {
+        openai::Models models;
+        std::string list_error;
+        if (openai::list_models(key, models, list_error) == ESP_OK && bsp_display_lock(1000)) {
+            std::string note = chat_apply_models(models);
+            if (!note.empty() && chat_view && generation == chat_generation) {
+                chat_add_bubble(BUBBLE_INFO, note);
+            }
+            bsp_display_unlock();
+        }
+    }
+    if (!bsp_display_lock(1000)) {
+        return false;
+    }
+    model = chat_model;
+    stt_model = chat_stt_model;
+    tts_model = chat_tts_model;
+    bsp_display_unlock();
+    return true;
 }
 
 // Runs in the worker task: record + transcribe (voice), ask the model, speak the reply
 void SSHTerminal::chat_job()
 {
     const uint32_t gen = chat_generation;
+    const Say info = [this, gen](const std::string& text) { chat_ui_bubble(gen, BUBBLE_INFO, text); };
+    const Say banner = [this](const std::string& text) { chat_ui_banner(text); };
     std::string key, error;
     if (vault::get(KEY_ID, key) != ESP_OK) {
         chat_recording = false;
-        chat_ui_bubble(gen, BUBBLE_INFO, "Can't read the API key - set it in 'settings'.");
+        info("Can't read the API key - set it in 'settings'.");
         return;
     }
 
-    // Once per boot, ask OpenAI for its current models so retired ones are replaced by newer ones
-    if (!chat_models_checked) {
-        openai::Models models;
-        std::string list_error;
-        if (openai::list_models(key, models, list_error) == ESP_OK && bsp_display_lock(1000)) {
-            std::string note = chat_apply_models(models);
-            if (!note.empty() && chat_view && gen == chat_generation) {
-                chat_add_bubble(BUBBLE_INFO, note);
-            }
-            bsp_display_unlock();
+    // Voice: record first, so nothing said is lost while OpenAI is asked for its models
+    int16_t* pcm = NULL;
+    size_t samples = 0;
+    if (chat_job_voice && !chat_record(pcm, samples, "release to send", banner, info)) {
+        if (chat_cancel) {
+            info("Stopped.");
         }
+        vault::wipe(key);
+        return;
     }
-    // The exact model names used for this whole request
     std::string model, stt_model, tts_model;
-    if (bsp_display_lock(1000)) {
-        model = chat_model;
-        stt_model = chat_stt_model;
-        tts_model = chat_tts_model;
-        bsp_display_unlock();
-    } else {
-        chat_recording = false;
+    if (!chat_job_models(key, gen, model, stt_model, tts_model)) {
+        heap_caps_free(pcm);
         vault::wipe(key);
         return;
     }
 
     if (chat_job_voice) {
-        int16_t* pcm = (int16_t*)heap_caps_malloc(MAX_RECORD_SAMPLES * 2, MALLOC_CAP_SPIRAM);
-        if (!pcm || audio::mic_start() != ESP_OK) {
-            chat_recording = false;
-            heap_caps_free(pcm);
-            chat_ui_bubble(gen, BUBBLE_INFO, "Microphone unavailable.");
-            vault::wipe(key);
-            return;
-        }
-        size_t n = 0;
-        int shown = -1;
-        while (chat_recording && !chat_cancel && n < MAX_RECORD_SAMPLES) {
-            n += audio::mic_read(pcm + n, std::min<size_t>(1600, MAX_RECORD_SAMPLES - n));
-            int secs = n / audio::MIC_RATE;
-            if (secs != shown) {
-                shown = secs;
-                chat_ui_banner("* Recording " + std::to_string(secs) + "s - release to send");
-            }
-        }
-        chat_recording = false;
-        audio::mic_stop();
-        if (chat_cancel) {
-            heap_caps_free(pcm);
-            chat_ui_bubble(gen, BUBBLE_INFO, "Stopped.");
-            vault::wipe(key);
-            return;
-        }
-
-        size_t skip = std::min(n, SKIP_SAMPLES);
-        int16_t* voice = pcm + skip;
-        n -= skip;
-        std::string heard;
-        int level = 0;
-        if (n < audio::MIC_RATE / 2) {
-            chat_ui_bubble(gen, BUBBLE_INFO, std::string("Too short - ") + board::HINT_TALK + " while you speak.");
-        } else if ((level = audio::normalize(voice, n)) < MIN_VOICE_PEAK) {
-            // Nothing worth uploading: say so instead of sending silence to OpenAI
-            chat_ui_bubble(gen, BUBBLE_INFO, "The microphone heard nothing (level " + std::to_string(level) +
-                                             ") - speak once 'Recording' shows.");
-        } else {
-            chat_ui_banner("Transcribing...");
-            if (openai::transcribe(key, stt_model, voice, n, audio::MIC_RATE, heard, error) != ESP_OK) {
-                chat_ui_bubble(gen, BUBBLE_INFO, error);
-            } else if (heard.empty()) {
-                chat_ui_bubble(gen, BUBBLE_INFO, "Didn't catch that (mic level " + std::to_string(level) +
-                                                 ") - try again.");
-            }
-        }
+        std::string heard = chat_transcribe(key, stt_model, pcm, samples, banner, info);
         heap_caps_free(pcm);
-        if (heard.empty() || chat_cancel) {
-            if (chat_cancel) {
-                chat_ui_bubble(gen, BUBBLE_INFO, "Stopped.");
-            }
+        if (heard.empty()) {
             vault::wipe(key);
             return;
         }
@@ -764,12 +817,151 @@ void SSHTerminal::chat_job()
 }
 
 // ---------------------------------------------------------------------------
-// Trackball push-to-talk
+// Dictation in an SSH session: hold the talk key, speak, let go. The words are typed at the
+// cursor (Tab5: sent to the server like keys; T-Deck: into the input line), without Enter, so
+// the user reads them before running anything. Same key, model and checks as the chat.
+// ---------------------------------------------------------------------------
+
+static const size_t MAX_DICTATION = 1000;      // Characters typed per recording
+static const int64_t STATUS_SHOWN_MS = 5000;   // A message stays in the title bar this long
+
+// Talk key pressed in an SSH session (keypad_task, display lock held). If dictation can't
+// start, the reason shows when the key is let go on its own (not for a slow Ctrl+C).
+void SSHTerminal::dictate_start()
+{
+    dictate_problem.clear();
+    if (!vault::has(KEY_ID)) {
+        dictate_problem = "To talk here, add an OpenAI key in ChatGPT.";
+    } else if (!vault::is_unlocked()) {
+        dictate_problem = "Saved passwords are locked - open ChatGPT to unlock.";
+    } else if (chat_busy || chat_models_busy) {
+        dictate_problem = "Still transcribing - try again in a moment.";
+    } else if (!wifi_connected) {
+        dictate_problem = "WiFi is off.";
+    }
+    if (!dictate_problem.empty()) {
+        return;
+    }
+    chat_recording = true;
+    chat_busy = true;
+    chat_cancel = false;
+    chat_job_dictate = true;
+    dictate_ssh_generation = ssh_generation;
+    dictate_status = "* Recording - release to type";
+    dictate_status_until_ms = 0;
+    sync_view();
+    if (xTaskCreate(chat_worker, "chat", WORKER_STACK, this, 4, NULL) != pdPASS) {
+        chat_busy = false;
+        chat_recording = false;
+        chat_job_dictate = false;
+        dictate_status.clear();
+        dictate_problem = "Not enough memory right now - try again.";
+    }
+}
+
+// Shown in the title bar (the Tab5's terminal fills the screen). From the worker: a message
+// (brief) stays a few seconds; progress until the next one. An empty progress ends it but
+// leaves a message showing.
+void SSHTerminal::dictate_show(const std::string& text, bool brief)
+{
+    if (!bsp_display_lock(200)) {
+        return;
+    }
+    if (!text.empty() || dictate_status_until_ms == 0) {
+        dictate_status = portal::printable(text, 120);   // Errors may quote OpenAI
+        dictate_status_until_ms = brief && !text.empty() ? esp_timer_get_time() / 1000 + STATUS_SHOWN_MS : 0;
+        sync_view();
+    }
+    bsp_display_unlock();
+}
+
+// Runs in the worker task: record, transcribe, hand the words to keypad_task (dictate_tick)
+void SSHTerminal::dictate_job()
+{
+    const Say info = [this](const std::string& text) { dictate_show(text, true); };
+    const Say banner = [this](const std::string& text) { dictate_show(text, false); };
+    std::string key;
+    if (vault::get(KEY_ID, key) != ESP_OK) {
+        chat_recording = false;
+        info("Can't read the OpenAI key - check it in ChatGPT.");
+        return;
+    }
+    int16_t* pcm = NULL;
+    size_t samples = 0;
+    if (!chat_record(pcm, samples, "release to type", banner, info)) {
+        vault::wipe(key);   // Stopped by Ctrl+key (Ctrl+C ...): quietly, nothing is typed
+        return;
+    }
+    std::string model, stt_model, tts_model;
+    std::string heard;
+    if (chat_job_models(key, chat_generation, model, stt_model, tts_model)) {
+        heard = chat_transcribe(key, stt_model, pcm, samples, banner, info);
+    }
+    heap_caps_free(pcm);
+    vault::wipe(key);
+
+    // Typed as keys: printable ASCII on one line (no Enter, no control codes)
+    std::string text = portal::printable(heard, MAX_DICTATION);
+    while (!text.empty() && text.back() == ' ') {
+        text.pop_back();
+    }
+    vault::wipe(heard);
+    if (text.empty() || !bsp_display_lock(1000)) {
+        vault::wipe(text);
+        return;
+    }
+    dictate_text = text;
+    dictate_ready = true;
+    bsp_display_unlock();
+    vault::wipe(text);
+}
+
+// keypad_task (display lock held): types the words at the cursor of the session they were
+// spoken in, and ends a message shown long enough
+void SSHTerminal::dictate_tick()
+{
+    if (dictate_status_until_ms && esp_timer_get_time() / 1000 >= dictate_status_until_ms) {
+        dictate_status.clear();
+        dictate_status_until_ms = 0;
+        sync_view();
+    }
+    if (!dictate_ready) {
+        return;
+    }
+    dictate_ready = false;
+    if (ssh_connected && ssh_generation == dictate_ssh_generation && !chat_active && !wizard_active()) {
+        last_input_ms = esp_timer_get_time() / 1000;
+        if (raw_keys()) {
+            term->scroll_to_newest();
+            write_channel(dictate_text.data(), dictate_text.size());
+        } else {
+            scroll_to_newest();
+            size_t at = std::min(cursor_pos, current_input.size());
+            current_input.insert(at, dictate_text);
+            cursor_pos = at + dictate_text.size();
+            update_input_display();
+        }
+    } else {
+        dictate_status = "Not typed: the SSH session has ended.";
+        dictate_status_until_ms = esp_timer_get_time() / 1000 + STATUS_SHOWN_MS;
+        sync_view();
+    }
+    vault::wipe(dictate_text);
+}
+
+// ---------------------------------------------------------------------------
+// Push-to-talk: trackball (Tab5: Ctrl) held
 // ---------------------------------------------------------------------------
 
 void SSHTerminal::on_trackball_hold(bool start, bool long_press)
 {
     if (start) {
+        // In an SSH session the words are typed at the cursor
+        hold_for_dictation = ssh_connected && !chat_active && !wizard_active();
+        if (hold_for_dictation) {
+            dictate_start();
+            return;
+        }
         if (!chat_active || wizard_active()) {
             return;
         }
@@ -783,10 +975,29 @@ void SSHTerminal::on_trackball_hold(bool start, bool long_press)
             update_input_display();
             chat_start_job(true);
         }
-    } else if (chat_recording) {
+        return;
+    }
+    bool dictating = hold_for_dictation;
+    hold_for_dictation = false;
+    if (chat_recording) {
         chat_recording = false;  // The worker stops recording and sends
-    } else if (long_press && !chat_active && !raw_keys()) {
+    } else if (dictating && !dictate_problem.empty()) {
+        dictate_status = dictate_problem;   // Why nothing was recorded
+        dictate_status_until_ms = esp_timer_get_time() / 1000 + STATUS_SHOWN_MS;
+        sync_view();
+    } else if (long_press && !dictating && !chat_active && !raw_keys()) {
         delete_current_history_entry();
+    }
+    dictate_problem.clear();
+}
+
+void SSHTerminal::cancel_talk()
+{
+    hold_for_dictation = false;
+    dictate_problem.clear();
+    if (chat_recording) {
+        chat_cancel = true;      // The worker drops the recording: nothing is sent
+        chat_recording = false;
     }
 }
 

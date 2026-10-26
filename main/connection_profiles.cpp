@@ -204,17 +204,27 @@ std::vector<SavedNetwork> network_store::load()
 
     for (const auto& record : load_records("wifi_nets", 'n', NETWORK_MAX_COUNT)) {
         // 2 | ssid | secret_saved | hidden   (version 1 had no hidden field)
+        // An SSID comes from the air and may itself hold the separator: the flags are the
+        // last fields and everything between the version and them is the SSID.
         std::vector<std::string> f = split_fields(record);
-        bool v1 = f.size() == 3 && f[0] == "1";
-        bool v2 = f.size() == 4 && f[0] == "2";
-        if ((!v1 && !v2) || f[1].empty()) {
+        const bool v1 = f[0] == "1";
+        const bool v2 = f[0] == "2";
+        const size_t flags = v2 ? 2 : 1;
+        if ((!v1 && !v2) || f.size() < flags + 2) {
             ESP_LOGW(TAG, "Skipping unreadable network record");
             continue;
         }
         SavedNetwork n;
         n.ssid = f[1];
-        n.secret_saved = f[2] == "1";
-        n.hidden = v2 && f[3] == "1";
+        for (size_t i = 2; i + flags < f.size(); i++) {
+            n.ssid += FIELD_SEP + f[i];
+        }
+        if (n.ssid.empty()) {
+            ESP_LOGW(TAG, "Skipping unreadable network record");
+            continue;
+        }
+        n.secret_saved = f[f.size() - flags] == "1";
+        n.hidden = v2 && f.back() == "1";
         networks.push_back(n);
     }
 

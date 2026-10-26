@@ -19,8 +19,8 @@ namespace board
         INPUT_LEFT,           // Older command / previous menu choice
         INPUT_RIGHT,          // Newer command / next menu choice
         INPUT_ENTER,
-        INPUT_HOLD_START,     // Push-to-talk pressed (ChatGPT)
-        INPUT_HOLD_END,       // Push-to-talk released
+        INPUT_HOLD_START,     // Push-to-talk pressed (ChatGPT, dictation in SSH)
+        INPUT_HOLD_END,       // Push-to-talk released: send the recording
         INPUT_HOLD_END_LONG,  // Long press released: deletes the shown history entry
         INPUT_CURSOR_LEFT,    // Move the cursor on the input line
         INPUT_CURSOR_RIGHT,
@@ -31,6 +31,7 @@ namespace board
         INPUT_F12 = INPUT_F1 + 11,
         INPUT_GO_HOME,        // Leave whatever is running (SSH, ChatGPT, a menu) for the home menu
         INPUT_ACTIVATE,       // A page row (or the back arrow) was tapped: answer with it
+        INPUT_HOLD_CANCEL,    // Push-to-talk key used with another key (Ctrl+C): drop the recording
     };
 
     // Keyboard values (board::read_key()): 0 when no key is waiting, a byte (printable ASCII,

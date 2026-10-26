@@ -451,6 +451,19 @@ TEST(portal_cookies_host_and_domain)
     CHECK_EQ(jar.header_for(other), std::string(""));
 }
 
+TEST(portal_cookies_ip_host_has_no_parent_domain)
+{
+    Url gateway, neighbour;
+    parse_url("http://192.168.1.1/login", gateway);
+    parse_url("http://10.168.1.1/", neighbour);
+    Cookies jar;
+    jar.store("leak=1; Domain=168.1.1", gateway);   // Not the gateway's own address: refused
+    jar.store("own=1; Domain=192.168.1.1", gateway);
+    CHECK_EQ(jar.size(), (size_t)1);
+    CHECK_EQ(jar.header_for(gateway), std::string("own=1"));
+    CHECK_EQ(jar.header_for(neighbour), std::string(""));
+}
+
 TEST(portal_cookies_secure_path_replace_delete)
 {
     Url https_url, http_url, admin;
@@ -469,6 +482,34 @@ TEST(portal_cookies_secure_path_replace_delete)
     CHECK_EQ(jar.header_for(http_url), std::string(""));
     jar.wipe();
     CHECK_EQ(jar.size(), (size_t)0);
+}
+
+TEST(portal_cookie_invalid_max_age_is_ignored)
+{
+    Url u;
+    parse_url("http://p.example/", u);
+    Cookies jar;
+    jar.store("a=1; Max-Age=abc", u);
+    jar.store("b=1; Max-Age=", u);
+    CHECK_EQ(jar.header_for(u), std::string("a=1; b=1"));
+    jar.store("a=1; Max-Age=-5", u);
+    CHECK_EQ(jar.header_for(u), std::string("b=1"));
+}
+
+TEST(portal_cookie_path_matches_whole_segments)
+{
+    Url set, admin, admin_x, admin_q, other;
+    parse_url("http://p.example/", set);
+    parse_url("http://p.example/admin", admin);
+    parse_url("http://p.example/admin/x", admin_x);
+    parse_url("http://p.example/admin?a=1", admin_q);
+    parse_url("http://p.example/administrator", other);
+    Cookies jar;
+    jar.store("a=1; Path=/admin", set);
+    CHECK_EQ(jar.header_for(admin), std::string("a=1"));
+    CHECK_EQ(jar.header_for(admin_x), std::string("a=1"));
+    CHECK_EQ(jar.header_for(admin_q), std::string("a=1"));
+    CHECK_EQ(jar.header_for(other), std::string(""));
 }
 
 TEST(portal_cookie_jar_is_bounded)
@@ -498,4 +539,19 @@ TEST(portal_wipe_clears_everything)
     wipe(r);
     CHECK(r.body.empty());
     CHECK(r.url.empty());
+}
+
+TEST(portal_unclosed_option_before_a_skipped_select)
+{
+    // The second select is disabled (no field): the open option must close into the first one
+    Page p = parse("<form action=/a><select name=a><option>x<select name=b disabled><option>y</select>"
+                   "<select name=c><option>z</select></form>");
+    int a = field_named(p, "a");
+    int c = field_named(p, "c");
+    CHECK(a >= 0 && c >= 0);
+    CHECK_EQ(p.fields[a].options.size(), (size_t)1);
+    CHECK_EQ(p.fields[a].options[0].value, std::string("x"));
+    CHECK_EQ(p.fields[c].options.size(), (size_t)1);
+    CHECK_EQ(p.fields[c].options[0].value, std::string("z"));
+    CHECK_EQ(field_named(p, "b"), -1);
 }

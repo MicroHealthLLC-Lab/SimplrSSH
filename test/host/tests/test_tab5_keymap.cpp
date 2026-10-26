@@ -189,12 +189,16 @@ TEST(keymap_ctrl_with_a_key_is_not_talking)
     release(k, CTRL, 6000);
     CHECK_EQ(k.pop(), 0u);
 
-    press(k, CTRL, 10000);                                  // Talking, then a key: no long hold
+    press(k, CTRL, 10000);                                  // Talking, then a key: recording dropped
     k.tick(10000 + Tab5Keymap::HOLD_MS);
     CHECK_EQ(k.pop(), KEY_EVENT | INPUT_HOLD_START);
-    CHECK_EQ(tap(k, C, 10500), 3u);
+    press(k, C, 10500);
+    CHECK_EQ(k.pop(), KEY_EVENT | INPUT_HOLD_CANCEL);       // Before the key, so it's never typed in
+    CHECK_EQ(k.pop(), 3u);                                  // Ctrl+C still goes through
+    release(k, C, 10600);
+    k.tick(20000);                                          // No second recording while Ctrl stays down
     release(k, CTRL, 10000 + 2 * Tab5Keymap::LONG_HOLD_MS);
-    CHECK_EQ(k.pop(), KEY_EVENT | INPUT_HOLD_END);
+    CHECK_EQ(k.pop(), 0u);                                  // No HOLD_END: nothing is sent
 }
 
 TEST(keymap_reset_stops_talking_and_modifiers)

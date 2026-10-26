@@ -20,11 +20,13 @@ namespace theme
     static const uint32_t SURFACE = 0x161B22;   // Title bar, input field, notice card
     static const uint32_t DIVIDER = 0x21262D;   // Row separators, ChatGPT's bubbles
     static const uint32_t TEXT = 0xE6EDF3;
-    static const uint32_t DIM = 0x8B949E;       // Details, hints, notes
-    static const uint32_t ACCENT = 0x2F81F7;    // Highlighted row, the user's bubbles
-    static const uint32_t DANGER = 0xF85149;
-    static const uint32_t OK = 0x3FB950;
-    static const uint32_t WARN = 0xD29922;
+    // WCAG 2.2 AAA (1.4.6): every text/background pair below is at least 7:1 (test_firmware_rules.py, `Contrast`)
+    static const uint32_t DIM = 0xB1BAC4;       // Details, hints, notes
+    static const uint32_t ACCENT = 0x2F81F7;    // Focus outlines, borders, icons (3:1 against BG, never text)
+    static const uint32_t ACCENT_BG = 0x0D47A1; // Fill behind white text: highlighted row, the user's bubbles
+    static const uint32_t DANGER = 0xFFA198;
+    static const uint32_t OK = 0x56D364;
+    static const uint32_t WARN = 0xE3B341;
 }
 
 class UiView

@@ -298,12 +298,13 @@ static bool parse_settings(const std::string& path, std::vector<Record>& records
         if (!known_namespace(r.ns) || !valid_key(r.key)) {
             ok = false;
         } else if (r.type == 's') {
-            ok = from_hex(value, r.value) && r.value.size() <= 4000;
+            ok = from_hex(value, r.value) && r.value.size() < 4000;   // NVS limit: 4000 bytes with the NUL
         } else if (r.type == 'b') {
             ok = from_hex(value, r.value, true) && !r.value.empty() && r.value.size() <= MAX_BLOB;
         } else if (r.type == 'u') {
             ok = !value.empty() && value.size() <= 10 &&
-                 value.find_first_not_of("0123456789") == std::string::npos;
+                 value.find_first_not_of("0123456789") == std::string::npos &&
+                 strtoull(value.c_str(), NULL, 10) <= UINT32_MAX;   // 10 digits can exceed a u32
             r.value = value;
         } else {
             ok = false;

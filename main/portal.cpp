@@ -864,6 +864,7 @@ namespace
             f.label = f.value.empty() ? "Submit" : printable(f.value, MAX_LABEL);
             button_field = add_field(f, attrs);
         } else if (tag == "select") {
+            finish_option();   // An unclosed <option> belongs to the previous select
             Field f;
             f.type = FieldType::Select;
             select_field = add_field(f, attrs);
@@ -1250,6 +1251,11 @@ Request submit(const Page& page, int form, int submitter)
 // Cookies (RAM only, gone when the sign-in ends)
 // ---------------------------------------------------------------------------
 
+static bool is_ipv4_literal(const std::string& host)
+{
+    return !host.empty() && std::all_of(host.begin(), host.end(), [](char c) { return isdigit((unsigned char)c) || c == '.'; });
+}
+
 static bool domain_match(const std::string& host, const std::string& domain)
 {
     return host == domain ||
@@ -1288,6 +1294,9 @@ void Cookies::store(const std::string& set_cookie, const Url& from)
         std::string value = aeq == std::string::npos ? "" : trim(a.substr(aeq + 1));
         if (key == "domain" && !value.empty()) {
             std::string d = lower(value[0] == '.' ? value.substr(1) : value);
+            if (is_ipv4_literal(from.host) && d != from.host) {
+                return;   // An address has no parent domain: "168.1.1" must not cover 10.168.1.1
+            }
             if (!domain_match(from.host, d) || (d != from.host && d.find('.') == std::string::npos)) {
                 return;   // Another site's (or a whole top-level domain's) cookie
             }
@@ -1298,7 +1307,10 @@ void Cookies::store(const std::string& set_cookie, const Url& from)
         } else if (key == "secure") {
             c.secure = true;
         } else if (key == "max-age") {
-            remove = atol(value.c_str()) <= 0;
+            // RFC 6265: a value that isn't digits (or a minus sign and digits) is ignored
+            if (!value.empty() && (isdigit((unsigned char)value[0]) || (value[0] == '-' && value.size() > 1))) {
+                remove = atol(value.c_str()) <= 0;
+            }
         }
     }
     for (size_t i = 0; i < jar.size(); i++) {
@@ -1324,6 +1336,11 @@ std::string Cookies::header_for(const Url& to) const
     for (const auto& c : jar) {
         bool host_ok = c.host_only ? to.host == c.domain : domain_match(to.host, c.domain);
         bool path_ok = to.path.compare(0, c.path.size(), c.path) == 0;
+        if (path_ok && c.path.back() != '/' && to.path.size() > c.path.size()) {
+            // RFC 6265 path-match: "/admin" covers "/admin/x" and "/admin?x", not "/administrator"
+            char next = to.path[c.path.size()];
+            path_ok = next == '/' || next == '?';
+        }
         if (host_ok && path_ok && (!c.secure || to.https)) {
             out += (out.empty() ? "" : "; ") + c.name + "=" + c.value;
         }

@@ -12,17 +12,17 @@ dependencies.lock.esp32p4, sdkconfig.tab5 and sdkconfig.defaults + sdkconfig.def
 
 Fails (exit 1) when
   - the component manager did not install exactly the versions in dependencies.lock
-    (its first "Processing N dependencies" pass, which also verifies component hashes);
-  - a component the build compiles (managed_components/) differs from the lock, unless it
-    is listed in KNOWN_DRIFT with the exact version seen today;
+    (its "Processing N dependencies" pass, which also verifies component hashes);
+  - the component manager ran a second time ("Missing kconfig option"): that re-run
+    re-solves the installed components' dependencies from the registry and replaces locked
+    versions with the newest releases (CMakeLists.txt seeds sdkconfig.json to prevent it);
+  - reconfigure rewrote the lock file (it no longer matches main/idf_component.yml, so the
+    component manager solved again: regenerate the lock and commit it);
+  - a component the build compiles (managed_components/) differs from the lock;
   - a setting in sdkconfig.defaults does not take effect in the generated sdkconfig.
 Reports, without failing, how far the committed sdkconfig is from the generated one.
 
-Known issue (KNOWN_DRIFT): ESP-IDF v5.5.1's component manager re-solves dependencies in a
-second pass and replaces some locked components with newer ones. Pinning the drifted
-versions here turns any further change (e.g. a new LVGL release upstream) into a failure
-instead of a silent firmware change. Fixing it means regenerating dependencies.lock so both
-passes agree, which changes the firmware and needs testing on a T-Deck.
+None of these depend on what the registry publishes: a build compiles exactly the lock.
 """
 
 import glob
@@ -30,19 +30,12 @@ import os
 import re
 import sys
 
-# component: (locked version, version the build actually compiles today), per board
-KNOWN_DRIFT = {
-    "lvgl/lvgl": ("9.4.0", "9.6.0~1"),
-    "espressif/cmake_utilities": ("0.5.3", "1.1.1"),
-    "espressif/led_strip": ("3.0.3", "3.1.0~1"),   # Pinned in main/idf_component.yml; unused
-}
-KNOWN_DRIFT_TAB5 = {
-    "lvgl/lvgl": ("9.4.0", "9.6.0~1"),
-}
+# board: (its lock file, its sdkconfig defaults files in the order ESP-IDF applies them)
 BOARDS = {
-    "tdeck": (KNOWN_DRIFT, ["sdkconfig.defaults"]),
-    "tab5": (KNOWN_DRIFT_TAB5, ["sdkconfig.defaults", "sdkconfig.defaults.esp32p4"]),
+    "tdeck": ("dependencies.lock", ["sdkconfig.defaults"]),
+    "tab5": ("dependencies.lock.esp32p4", ["sdkconfig.defaults", "sdkconfig.defaults.esp32p4"]),
 }
+RERUN = "Missing kconfig option"   # ESP-IDF re-runs the component manager after this
 
 
 def error(message, file=None):
@@ -78,7 +71,8 @@ def lock_versions(text):
 
 
 def first_install_pass(log):
-    """{name: version} from the first 'Processing N dependencies' block of the log."""
+    """{name: version} from the first 'Processing N dependencies' block of the log (a re-run,
+    if any, prints a second one)."""
     block = re.search(r"Processing (\d+) dependencies:\s*\n((?:.*\n)*?)(?=.*(?:\[\1/\1\]).*\n)", log)
     if not block:
         return None
@@ -122,10 +116,20 @@ def read_sdkconfig(path):
 
 
 def check(root, log, committed_lock, committed_cfg, generated_cfg, board="tdeck"):
-    known_drift, defaults_files = BOARDS[board]
+    lock_name, defaults_files = BOARDS[board]
     problems = []
     with open(committed_lock, encoding="utf-8") as f:
-        locked = lock_versions(f.read())
+        committed_lock_text = f.read()
+    locked = lock_versions(committed_lock_text)
+
+    if RERUN in log:
+        problems.append(f"the component manager ran twice ('{RERUN}'), so the build may compile newer "
+                        "components than the lock: make the first run see every $CONFIG{...} its "
+                        "manifests use (CMakeLists.txt seeds build/config/sdkconfig.json from the sdkconfig)")
+    with open(os.path.join(root, lock_name), encoding="utf-8") as f:
+        if f.read() != committed_lock_text:
+            problems.append(f"reconfigure rewrote {lock_name}: it does not match main/idf_component.yml. "
+                            "Regenerate it in a clean copy (no build dir, no managed_components/) and commit it")
 
     installed = first_install_pass(log)
     if installed is None:
@@ -133,7 +137,7 @@ def check(root, log, committed_lock, committed_cfg, generated_cfg, board="tdeck"
     elif installed != locked:
         for name in sorted(set(installed) | set(locked)):
             if installed.get(name) != locked.get(name):
-                problems.append(f"{name}: installed {installed.get(name)} but dependencies.lock has "
+                problems.append(f"{name}: installed {installed.get(name)} but {lock_name} has "
                                 f"{locked.get(name)} (run idf.py update-dependencies and commit the lock)")
 
     compiled = compiled_versions(root)
@@ -142,16 +146,8 @@ def check(root, log, committed_lock, committed_cfg, generated_cfg, board="tdeck"
         lock_v, built_v = locked.get(name), compiled.get(name)
         if lock_v == built_v:
             continue
-        known = known_drift.get(name)
-        if known == (lock_v, built_v):
-            drift_rows.append((name, lock_v, built_v, "known"))
-            warning(f"{name}: the build compiles {built_v}, dependencies.lock pins {lock_v} "
-                    "(known component-manager re-solve, see check_dependencies.py)", "dependencies.lock")
-        else:
-            drift_rows.append((name, lock_v, built_v, "NEW"))
-            problems.append(f"{name}: the build compiles {built_v} but dependencies.lock pins {lock_v}")
-    for name in sorted(set(known_drift) - {r[0] for r in drift_rows}):
-        warning(f"{name} no longer drifts: remove it from KNOWN_DRIFT in check_dependencies.py")
+        drift_rows.append((name, lock_v, built_v))
+        problems.append(f"{name}: the build compiles {built_v} but {lock_name} pins {lock_v}")
 
     defaults = {}   # Later files override earlier ones, as in ESP-IDF
     for name in defaults_files:
@@ -183,14 +179,14 @@ def main():
         log = f.read()
     problems, drift, count, stale = check(os.getcwd(), log, args[1], args[2], args[3], board)
     for p in problems:
-        error(p, "dependencies.lock" if "lock" in p else None)
+        error(p, BOARDS[board][0] if "lock" in p else None)
 
     lines = [f"## Dependencies ({board})", "",
              f"{count} locked components installed with verified hashes: "
              f"{'yes' if not any('installed' in p for p in problems) else '**no**'}.", ""]
     if drift:
-        lines += ["| Component | Locked | Compiled | Status |", "|---|---|---|---|"]
-        lines += [f"| {n} | {a} | {b} | {s} |" for n, a, b, s in drift]
+        lines += ["| Component | Locked | Compiled |", "|---|---|---|"]
+        lines += [f"| {n} | {a} | {b} |" for n, a, b in drift]
         lines.append("")
     lines.append(f"Committed sdkconfig vs generated: {stale} options differ (report only).")
     report = "\n".join(lines) + "\n"

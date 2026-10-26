@@ -37,9 +37,8 @@ BUDGETS = {"tdeck": INTERNAL_RAM_BUDGET, "tab5": TAB5_INTERNAL_RAM_BUDGET}
 
 WARNING_RE = re.compile(r"(?:^|/)(main/[^:\s]+):(\d+):\d+: warning: (.*?)(?: \[(-W[^\]]+)\])?$")
 
-# Warnings accepted for now, each tied to an open issue. LVGL 9.6 deprecated these flag
-# helpers; the build compiles 9.6.0~1 although dependencies.lock pins 9.4.0 (KNOWN_DRIFT in
-# check_dependencies.py). Remove once the lock is fixed and the calls are migrated.
+# Warnings accepted for now, each tied to an open issue. LVGL 9.6 (locked at 9.6.0~1)
+# deprecated these flag helpers. Remove once the calls are migrated.
 KNOWN_WARNINGS = [
     re.compile(r"'[^']*\blv_obj_(?:add|remove|has)_flag\(.*' is deprecated"),
 ]
@@ -185,7 +184,7 @@ def cmd_warnings(args):
         path, row, message = entry.split(":", 2)
         error(f"compiler warning: {message.strip()}", f"{path},line={row}")
     summary(f"## Compiler warnings (main/)\n\n{len(blocking)} blocking, {len(known)} known "
-            "(LVGL 9.6 deprecations from the dependency drift, see check_dependencies.py).")
+            "(LVGL 9.6 deprecations, see KNOWN_WARNINGS in check_firmware.py).")
     return 1 if blocking else 0
 
 

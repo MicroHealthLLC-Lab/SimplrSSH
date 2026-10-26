@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Audit gate for the Tests workflow: reads the JSON report of `esp-idf-sbom check` (CVEs from
-the National Vulnerability Database for ESP-IDF, its bundled libraries and the registry
-components in the firmware) and fails on
+Firmware CVE audit of the Security scan workflow (security-scan.yml, firmware-audit job):
+reads the JSON report of `esp-idf-sbom check` (CVEs from the National Vulnerability Database
+for ESP-IDF, its bundled libraries and the registry components in the firmware) and fails on
 
   - a HIGH or CRITICAL vulnerability that is not in .github/audit-baseline.txt;
   - any vulnerability in CISA's Known Exploited Vulnerabilities list, baseline or not.
