@@ -164,7 +164,7 @@ requests (each workflow declares what it writes); a ruleset stops deletion and f
 Dependabot alerts and private vulnerability reporting are on. The security scan needs
 `secrets.AWS_ROLE` on this repository or shared with it by the organization (an org secret
 limited to private repositories never reaches a public one), and the role's OIDC trust must
-include `repo:MicroHealthLLC/SimplrSSH`.
+include `repo:MicroHealthLLC-Lab/SimplrSSH`.
 
 Found while introducing these checks:
 
