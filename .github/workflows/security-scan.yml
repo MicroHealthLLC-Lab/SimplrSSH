@@ -47,7 +47,10 @@ jobs:
       aws_region: ${{ vars.AWS_REGION_EAST_1 }}
       zap_target: ${{ vars.ZAP_TARGET_URL }}
       baseline_ref: ${{ github.base_ref }}
-    secrets: inherit
+    # Passed by name: `secrets: inherit` only reaches a workflow in the same organization, and
+    # sast-rules is in MicroHealthLLC while this repository is in MicroHealthLLC-Lab
+    secrets:
+      AWS_ROLE: ${{ secrets.AWS_ROLE }}
 
   # firmware-audit: CVEs in what the firmware is built from. Both boards are built in the
   # pinned ESP-IDF image and esp-idf-sbom writes each image's SBOM, then queries the NVD.
